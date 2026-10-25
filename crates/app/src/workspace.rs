@@ -565,9 +565,9 @@ impl Workspace {
             window,
             |this, _, event: &FileEvent, window, cx| {
                 match event {
-                    FileEvent::Renamed { from, to } => {
-                        this.tabs.update(cx, |tabs, cx| tabs.renamed(from, to, cx))
-                    }
+                    FileEvent::Renamed { from, to } => this
+                        .tabs
+                        .update(cx, |tabs, cx| tabs.renamed(from, to, window, cx)),
                     FileEvent::Trashed { path } => this
                         .tabs
                         .update(cx, |tabs, cx| tabs.trashed(path, window, cx)),

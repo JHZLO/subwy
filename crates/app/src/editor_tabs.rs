@@ -144,6 +144,14 @@ fn tab_size(settings: &subwy_project::settings::Settings) -> TabSize {
     }
 }
 
+/// A tab's language: its file's, or plain text past the size highlighting stops at.
+fn tab_language(path: &Path, len: u64) -> SharedString {
+    match len > MAX_HIGHLIGHT_BYTES {
+        true => "text".into(),
+        false => language_for(path),
+    }
+}
+
 fn language_for(path: &Path) -> SharedString {
     let ext = path
         .extension()
@@ -637,10 +645,7 @@ impl EditorTabs {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Tab {
-        let mut language = language_for(&path);
-        if file.stamp.len > MAX_HIGHLIGHT_BYTES {
-            language = "text".into();
-        }
+        let language = tab_language(&path, file.stamp.len);
         let markdown = language == "markdown";
         let editor = cx.new(|cx| {
             let settings = crate::settings(cx).clone();
@@ -870,7 +875,7 @@ impl EditorTabs {
     }
 
     /// The tree renamed `from` (a file or a folder) to `to`; tabs inside follow the new path.
-    pub fn renamed(&mut self, from: &Path, to: &Path, cx: &mut Context<Self>) {
+    pub fn renamed(&mut self, from: &Path, to: &Path, window: &mut Window, cx: &mut Context<Self>) {
         let moved = |path: &mut PathBuf| {
             if let Ok(rest) = path.strip_prefix(from) {
                 // `join("")` would leave a trailing slash, and the disk would then take the file
@@ -886,6 +891,20 @@ impl EditorTabs {
         self.pending
             .iter_mut()
             .for_each(|open| moved(&mut open.path));
+        // A new extension is a new language: `notes` renamed `notes.md` is Markdown from now on.
+        let settings = crate::settings(cx).clone();
+        for tab in &mut self.tabs {
+            let language = tab_language(&tab.path, tab.stamp.len);
+            if language != tab.language {
+                let wrap = settings.wraps(language == "markdown");
+                tab.editor.update(cx, |state, cx| {
+                    state.set_highlighter(language.clone(), cx);
+                    state.set_soft_wrap(wrap, window, cx);
+                });
+                tab.language = language;
+            }
+        }
+        self.refresh_preview(cx);
         cx.emit(TabsChanged);
         cx.notify();
     }
