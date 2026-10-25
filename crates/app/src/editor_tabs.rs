@@ -24,7 +24,7 @@ use subwy_project::{
 };
 
 use crate::{
-    keymap::{IndentItem, MARKDOWN, Newline, OutdentItem, ToggleBold, ToggleItalic},
+    keymap::{DeleteIndent, IndentItem, MARKDOWN, Newline, OutdentItem, ToggleBold, ToggleItalic},
     preview::Preview,
     theme::{self, Palette, c, size, z},
 };
@@ -1382,6 +1382,18 @@ impl EditorTabs {
         }
     }
 
+    fn delete_indent(&mut self, _: &DeleteIndent, window: &mut Window, cx: &mut Context<Self>) {
+        let tab = crate::settings(cx).tab_size;
+        self.edit_markdown(window, cx, |text, selection| {
+            if !selection.is_empty() {
+                return None;
+            }
+            let (row, start, line) = line_at(text, selection.start);
+            markdown::unindent(&line, selection.start - start, &list_unit(text, row), tab)
+                .map(|edit| (start, edit))
+        });
+    }
+
     /// Down on the last line goes to the end of the text and Up on the first to its start, as in
     /// macOS text views; gpui-kit's editor stays put there. Only the editor knows its rows (soft
     /// wrap, folds), so its own move runs first and a caret it left in place goes on.
@@ -1696,6 +1708,7 @@ impl Render for EditorTabs {
                         .on_action(cx.listener(Self::newline))
                         .on_action(cx.listener(Self::indent_item))
                         .on_action(cx.listener(Self::outdent_item))
+                        .on_action(cx.listener(Self::delete_indent))
                         .on_action(cx.listener(|this, _: &ToggleBold, window, cx| {
                             this.toggle_emphasis(Emphasis::Bold, window, cx)
                         }))

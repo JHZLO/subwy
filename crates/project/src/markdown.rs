@@ -232,6 +232,28 @@ pub fn outdent(line: &str, selection: Range<usize>, unit: &str) -> Option<Edit> 
     })
 }
 
+/// Backspace in a line's leading spaces: back to the indent stop before the cursor, as many spaces
+/// as Tab adds there (`unit` on a list item, `tab` elsewhere). `None` leaves a single space, a tab
+/// or anything after the indent to the editor's one-character delete.
+pub fn unindent(line: &str, cursor: usize, unit: &str, tab: usize) -> Option<Edit> {
+    let before = line.get(..cursor)?;
+    if before.is_empty() || before.bytes().any(|b| b != b' ') {
+        return None;
+    }
+    let width = match item(line).filter(|i| i.list) {
+        Some(_) if unit.bytes().all(|b| b == b' ') => unit.len(),
+        Some(_) => return None,
+        None => tab,
+    };
+    let remove = (cursor - 1) % width.max(1) + 1;
+    let start = cursor - remove;
+    (remove > 1).then(|| Edit {
+        range: start..cursor,
+        text: String::new(),
+        selection: start..start,
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Emphasis {
     Bold,
@@ -438,6 +460,30 @@ mod tests {
         assert_eq!(apply(" - item", edit), "|- item");
         let edit = outdent("\t- item", 1..1, "\t").expect("outdent");
         assert_eq!(apply("\t- item", edit), "|- item");
+    }
+
+    #[test]
+    fn backspace_in_the_indent_goes_back_a_whole_stop() {
+        let edit = unindent("    - item", 4, "    ", 4).expect("unindent");
+        assert_eq!(apply("    - item", edit), "|- item");
+        // Off a stop, back to the one before.
+        let edit = unindent("      - item", 6, "    ", 4).expect("unindent");
+        assert_eq!(apply("      - item", edit), "    |- item");
+        // A list takes its own unit; other lines the tab size.
+        let edit = unindent("    - item", 4, "  ", 4).expect("unindent");
+        assert_eq!(apply("    - item", edit), "  |- item");
+        let edit = unindent("        plain", 8, "  ", 4).expect("unindent");
+        assert_eq!(apply("        plain", edit), "    |plain");
+    }
+
+    #[test]
+    fn backspace_outside_the_indent_is_left_to_the_editor() {
+        assert_eq!(unindent("    - item", 0, "    ", 4), None);
+        assert_eq!(unindent(" x", 1, "    ", 4), None);
+        assert_eq!(unindent("  - item", 4, "  ", 4), None);
+        assert_eq!(unindent("    text", 6, "    ", 4), None);
+        assert_eq!(unindent("\t- item", 1, "\t", 4), None);
+        assert_eq!(unindent("    - item", 4, "\t", 4), None);
     }
 
     #[test]

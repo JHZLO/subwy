@@ -157,6 +157,29 @@ pub fn run(check: &mut Check) {
     );
 
     edges(check);
+    backspace_indent(check);
+}
+
+/// Backspace in a list item's indent takes the whole indent unit at once; elsewhere one character.
+fn backspace_indent(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("list.md"), "- top\n    - nested").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter");
+    expect_text(
+        check,
+        window,
+        "down right right right right backspace",
+        "markdown: backspace in the indent takes a whole unit",
+        "- top\n- nested",
+    );
+    expect_text(
+        check,
+        window,
+        "end backspace",
+        "markdown: backspace after text takes one character",
+        "- top\n- neste",
+    );
 }
 
 /// Down on the last line goes to the end of the text and Up on the first to its start; elsewhere

@@ -95,7 +95,14 @@ const MARKDOWN_EDITOR: &str = "Markdown > Input";
 
 actions!(
     markdown,
-    [Newline, IndentItem, OutdentItem, ToggleBold, ToggleItalic]
+    [
+        Newline,
+        IndentItem,
+        OutdentItem,
+        DeleteIndent,
+        ToggleBold,
+        ToggleItalic
+    ]
 );
 
 /// Binds the user's extra keys from the settings file. Returns the first one that could not be bound.
@@ -221,6 +228,7 @@ fn own_keys() -> Vec<Own> {
         own("enter", Newline, Some(MARKDOWN_EDITOR)),
         own("tab", IndentItem, Some(MARKDOWN_EDITOR)),
         own("shift-tab", OutdentItem, Some(MARKDOWN_EDITOR)),
+        own("backspace", DeleteIndent, Some(MARKDOWN_EDITOR)),
         own("cmd-b", ToggleBold, Some(MARKDOWN_EDITOR)),
         own("cmd-i", ToggleItalic, Some(MARKDOWN_EDITOR)),
         // The terminal (IntelliJ's Alt+F12). Keys without a binding go to the shell.
