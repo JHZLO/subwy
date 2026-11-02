@@ -157,6 +157,17 @@ impl Check {
         }
     }
 
+    /// The window's size in points. The screen bounds it, so on a small one (a CI machine's) it is
+    /// less than the 1280 by 800 asked for.
+    pub fn window_size(&mut self, window: AnyWindowHandle) -> (f32, f32) {
+        self.cx
+            .update_window(window, |_, window, _| {
+                let size = window.viewport_size();
+                (size.width.as_f32(), size.height.as_f32())
+            })
+            .expect("window")
+    }
+
     pub fn clipboard(&self) -> Option<String> {
         self.cx.read_from_clipboard().and_then(|item| item.text())
     }

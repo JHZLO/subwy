@@ -83,7 +83,8 @@ pub fn run(check: &mut Check) {
     change(check, window, |s| s.appearance = Appearance::System);
     // The Tree page, its switches; Cmd+W closes the dialog, not the file behind it.
     check.keys(window, "cmd-,");
-    click(check, window, SIDEBAR_X, page_y(2));
+    let (left, top) = page(check, window);
+    click(check, window, left + SIDEBAR, page_y(top, 2));
     check.shot(window, "settings-4-tree");
     check.keys(window, "cmd-w");
     let state = check.workspace(window, |w, cx| (w.settings_open(), w.active_file(cx)));
@@ -92,9 +93,10 @@ pub fn run(check: &mut Check) {
         state,
         (false, Some(PathBuf::from("docs/notes.md"))),
     );
-    // A click beside the dialog closes it too.
+    // A click beside the dialog closes it too: in the margin it keeps even in a small window.
     check.keys(window, "cmd-,");
-    click(check, window, 40., 400.);
+    let (_, height) = check.window_size(window);
+    click(check, window, 16., height / 2.);
     let open = check.workspace(window, |w, _| w.settings_open());
     check.expect_eq("a click beside it closes it", open, false);
     keymap(check);
@@ -102,15 +104,26 @@ pub fn run(check: &mut Check) {
     terminal_options(check);
 }
 
-/// Where the dialog's settings page starts in a 1280 by 800 window: the dialog is 960 by 680 in the
-/// middle, under its 40 high title line, inside its border.
-const PAGE_LEFT: f32 = 160. + 1.;
-const PAGE_TOP: f32 = 60. + 40. + 1.;
-/// The sidebar's page list: its column, and the middle of the line of page `index`.
-const SIDEBAR_X: f32 = PAGE_LEFT + 28.;
+/// Where the dialog's settings page starts: the dialog is 960 by 680 (less in a window too small
+/// for that and its 32 margin) in the middle, under its 40 high title line, inside its border.
+fn page(check: &mut Check, window: AnyWindowHandle) -> (f32, f32) {
+    let (width, height) = check.window_size(window);
+    let dialog = (
+        960f32.min(width - 64.).max(320.),
+        680f32.min(height - 64.).max(240.),
+    );
+    (
+        (width - dialog.0) / 2. + 1.,
+        (height - dialog.1) / 2. + 40. + 1.,
+    )
+}
 
-fn page_y(index: usize) -> f32 {
-    PAGE_TOP + 56. + 28.8 * index as f32
+/// The sidebar's page list: its column from the page's left, and the middle of the line of page
+/// `index`.
+const SIDEBAR: f32 = 28.;
+
+fn page_y(top: f32, index: usize) -> f32 {
+    top + 56. + 28.8 * index as f32
 }
 
 /// Changes the settings as the Settings dialog's fields do. The change applies once the update that
@@ -171,12 +184,13 @@ fn keymap(check: &mut Check) {
     let before = check.cx.update(|cx| subwy::settings(cx).keymap.clone());
     check.keys(window, "cmd-,");
     // Keymap is the sixth page in the sidebar.
-    click(check, window, SIDEBAR_X, page_y(5));
+    let (left, top) = page(check, window);
+    click(check, window, left + SIDEBAR, page_y(top, 5));
     check.shot(window, "settings-5-keymap");
     // Search for Rename, click its key and press F2.
-    click(check, window, PAGE_LEFT + 603., PAGE_TOP + 77.);
+    click(check, window, left + 603., top + 77.);
     check.keys(window, "r e n a m e");
-    click(check, window, PAGE_LEFT + 808., PAGE_TOP + 144.);
+    click(check, window, left + 808., top + 144.);
     check.shot(window, "settings-6-recording");
     check.keys(window, "f2");
     let keymap = check.cx.update(|cx| subwy::settings(cx).keymap.clone());

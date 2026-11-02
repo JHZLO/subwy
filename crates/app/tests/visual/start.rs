@@ -4,16 +4,11 @@ use std::path::Path;
 
 use gpui_kit::{
     component::{Theme, ThemeMode},
+    test::TestWindowExt as _,
     *,
 };
 
 use crate::check::Check;
-
-/// Blog's station in a 1280 x 800 window at 100%: the map (1070 wide: labels 230, lines 840) is
-/// centered in the island (x 6, 1268 wide) and blog is the first station (90) of the third line;
-/// the map's rows sit 130 apart from 48 below its top, which is centered between the greeting and
-/// the keys (about y 272).
-const BLOG: (f32, f32) = (105. + 230. + 90., 272. + 48. + 260.);
 
 /// The folders of the design mockup, opened oldest first so `leaf` is the newest.
 const FOLDERS: [&str; 8] = [
@@ -91,9 +86,18 @@ pub fn run(check: &mut Check) {
 
     // A click on a station opens it.
     let empty = check.open(None);
+    let blog = base.join("Documents/blog");
     check
         .cx
-        .simulate_click(empty, point(px(BLOG.0), px(BLOG.1)), Modifiers::default());
+        .update_window(empty, |_, window, cx| {
+            window.render_frame(cx);
+            window.click(
+                ElementId::Name(format!("station {}", blog.display()).into()),
+                cx,
+            );
+        })
+        .expect("window");
+    check.cx.run_until_parked();
     let root = check.workspace(empty, |w, cx| w.root(cx));
     check.expect_eq(
         "a click on a station opens it",

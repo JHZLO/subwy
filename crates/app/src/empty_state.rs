@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use gpui_kit::{prelude::FluentBuilder as _, *};
+use gpui_kit::{TestSupportExt as _, prelude::FluentBuilder as _, *};
 use subwy_project::{
     network::{self, Network},
     paths, session,
@@ -316,8 +316,11 @@ fn map(
                 .child(name);
             // An interchange's line leaves downward, so its name and hint go above.
             let above = station.interchange;
+            // Named by its folder, so the UI checks find it wherever the map lands.
             let name = div()
-                .id(("station", i))
+                .id(ElementId::Name(
+                    format!("station {}", recent[i].display()).into(),
+                ))
                 .absolute()
                 .left(px(x - name_width / 2.))
                 .w(px(name_width))
@@ -334,7 +337,8 @@ fn map(
                 .text_size(fit.px(13.))
                 .child(label)
                 .when(chosen, |el| el.child(hint))
-                .on_click(move |_, window, cx| open_name(i, window, cx));
+                .on_click(move |_, window, cx| open_name(i, window, cx))
+                .test_support();
             [hit.into_any_element(), name.into_any_element()]
         });
     let stations: Vec<AnyElement> = stations.collect();

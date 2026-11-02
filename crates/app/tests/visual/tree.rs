@@ -484,8 +484,17 @@ fn drag_and_drop(check: &mut Check) {
         active,
         Some(PathBuf::from("docs/notes.md")),
     );
-    // And on the terminal its path is typed.
-    drag(check, window, (100., row_y(3)), (700., 650.), none, None);
+    // And on the terminal its path is typed: dropped in the middle of the terminal, 260 high over
+    // the gap (6) and the status bar (26) at the window's foot.
+    let (_, height) = check.window_size(window);
+    drag(
+        check,
+        window,
+        (100., row_y(3)),
+        (700., height - 162.),
+        none,
+        None,
+    );
     // The long temporary path wraps, so the screen is read as one string.
     let typed = crate::terminal::wait_for(check, window, |lines| {
         lines.concat().contains("docs/notes.md")

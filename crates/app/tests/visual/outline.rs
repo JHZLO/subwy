@@ -7,10 +7,12 @@ use crate::check::{Check, fixture};
 
 const TEXT: &str = "# Keys\n\nWalk the tree.\n\n## Tree\n\nArrows move.\n\n### Speed search\n\nType a name.\n\n## Editor\n\nThe editor is gpui-kit's.\n\n## Terminal\n\nAlt+F12.\n";
 
-/// The outline's stations at 100% zoom in a 1280-wide window: the column is 230 wide at the editor
-/// island's right (6 in from the window's edge); the stations start under the title bar (38), the
-/// tab bar (34), the route line above the editor (30) and the outline's own header (34), 30 apart.
-const STATION_X: f32 = 1280. - 6. - 230. + 60.;
+/// The outline's stations at 100% zoom: the column is 230 wide at the editor island's right (6 in
+/// from the window's edge); the stations start under the title bar (38), the tab bar (34), the
+/// route line above the editor (30) and the outline's own header (34), 30 apart.
+fn station_x(check: &mut Check, window: AnyWindowHandle) -> f32 {
+    check.window_size(window).0 - 6. - 230. + 60.
+}
 
 fn station_y(index: usize) -> f32 {
     38. + 34. + 30. + 34. + 30. * index as f32 + 15.
@@ -27,7 +29,8 @@ pub fn run(check: &mut Check) {
     });
     check.shot(window, "outline-1-stations");
     // The fourth station is Editor, on line 13.
-    click(check, window, STATION_X, station_y(3));
+    let x = station_x(check, window);
+    click(check, window, x, station_y(3));
     check.keys(window, "cmd-alt-shift-c");
     let copied = check.clipboard();
     check.expect_eq(
