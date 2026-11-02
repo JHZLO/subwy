@@ -1,0 +1,37 @@
+# The checks every commit passes before it reaches main: format, lint, unit tests and the offscreen
+# UI checks. On macOS, the one platform subwy targets.
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-toolchain.toml
+        run: |
+          channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$channel" --profile minimal --component rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test --workspace --lib
+      - name: Offscreen UI checks
+        run: cargo test -p subwy --test visual
+      - name: UI check screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual
+          path: target/visual/
+          if-no-files-found: ignore
