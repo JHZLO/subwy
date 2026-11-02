@@ -57,11 +57,11 @@ pub fn run(check: &mut Check) {
 /// A file renamed to `.md` is Markdown from then on: the preview shows it.
 fn renamed_to_markdown(check: &mut Check) {
     let dir = tempfile::tempdir().expect("temp dir");
-    std::fs::write(dir.path().join("notes"), "# Notes\n\ntext\n").expect("write");
+    std::fs::write(dir.path().join("notes.txt"), "# Notes\n\ntext\n").expect("write");
     let window = check.open(Some(dir.path()));
     check.keys(window, "down down enter cmd-shift-v");
     let shown = page_shown(check, window);
-    check.expect_eq("a file without an extension has no preview", shown, false);
+    check.expect_eq("a text file has no preview", shown, false);
     check.keys(window, "cmd-1 shift-f6 cmd-a n o t e s . m d enter");
     let shown = check.wait_until(|check| page_shown(check, window));
     check.expect_eq("renamed to .md, the preview shows it", shown, true);

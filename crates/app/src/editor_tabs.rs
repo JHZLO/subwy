@@ -145,14 +145,16 @@ fn tab_size(settings: &subwy_project::settings::Settings) -> TabSize {
 }
 
 /// A tab's language: its file's, or plain text past the size highlighting stops at.
-fn tab_language(path: &Path, len: u64) -> SharedString {
+fn tab_language(path: &Path, text: &str, len: u64) -> SharedString {
     match len > MAX_HIGHLIGHT_BYTES {
         true => "text".into(),
-        false => language_for(path),
+        false => language_for(path, text),
     }
 }
 
-fn language_for(path: &Path) -> SharedString {
+/// The language for `path`, by its extension. A file without one is a note, so Markdown, unless
+/// it is a dotfile, a build file or a script (`#!` on its first line).
+fn language_for(path: &Path, text: &str) -> SharedString {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -163,7 +165,16 @@ fn language_for(path: &Path) -> SharedString {
         "yml" => "yaml".into(),
         "ts" | "mts" | "cts" => "typescript".into(),
         "js" | "mjs" | "cjs" => "javascript".into(),
-        "" => "text".into(),
+        "" => {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            let note = !name.starts_with('.')
+                && !matches!(name.as_str(), "makefile" | "justfile" | "dockerfile")
+                && !text.starts_with("#!");
+            SharedString::from(if note { "markdown" } else { "text" })
+        }
         other => other.to_string().into(),
     }
 }
@@ -645,7 +656,7 @@ impl EditorTabs {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Tab {
-        let language = tab_language(&path, file.stamp.len);
+        let language = tab_language(&path, &file.text, file.stamp.len);
         let markdown = language == "markdown";
         let editor = cx.new(|cx| {
             let settings = crate::settings(cx).clone();
@@ -920,7 +931,8 @@ impl EditorTabs {
         // A new extension is a new language: `notes` renamed `notes.md` is Markdown from now on.
         let settings = crate::settings(cx).clone();
         for tab in &mut self.tabs {
-            let language = tab_language(&tab.path, tab.stamp.len);
+            let text = tab.editor.read(cx).value();
+            let language = tab_language(&tab.path, &text, tab.stamp.len);
             if language != tab.language {
                 let wrap = settings.wraps(language == "markdown");
                 tab.editor.update(cx, |state, cx| {
@@ -1871,13 +1883,28 @@ fn check_disk(path: &Path, known: FileStamp, dirty: bool) -> DiskState {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: GPUI's glob export includes a `test` macro that would replace the built-in one.
-    use super::{DiskState, Saved, active_after_close, check_disk, write_file};
+    use std::path::Path;
+
+    use super::{DiskState, Saved, active_after_close, check_disk, language_for, write_file};
     use subwy_project::fs::{self, LineEnding};
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("subwy-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_file_without_an_extension_is_a_markdown_note() {
+        let language = |path: &str, text: &str| language_for(Path::new(path), text).to_string();
+        assert_eq!(language("memo/\u{b204}\u{c544}", "- one\n"), "markdown");
+        assert_eq!(language("LICENSE", "MIT License\n"), "markdown");
+        assert_eq!(language("notes.md", ""), "markdown");
+        assert_eq!(language("src/main.rs", ""), "rs");
+        // Not notes: dotfiles, build files and scripts.
+        assert_eq!(language(".gitignore", "target/\n"), "text");
+        assert_eq!(language("Makefile", "all:\n"), "text");
+        assert_eq!(language("scripts/subwy", "#!/bin/zsh\n"), "text");
     }
 
     #[test]

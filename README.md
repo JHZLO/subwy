@@ -7,7 +7,8 @@ A light, fast, keyboard-first text and Markdown editor for macOS, written in Rus
 Open a folder, walk its tree with the arrow keys (the way to the selection is drawn as a metro
 line, and glides as you move), copy paths in one keystroke, and read Markdown and code with
 syntax highlighting, with your shell a keystroke away. An editor, not an IDE: no
-language servers or plugins.
+language servers or plugins. A file without an extension is taken for a note and opens as
+Markdown (dotfiles, `Makefile`, `justfile`, `Dockerfile` and `#!` scripts stay plain text).
 
 Early days: macOS only, built from source.
 
