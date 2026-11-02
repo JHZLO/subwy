@@ -160,7 +160,8 @@ pub fn run(check: &mut Check) {
     backspace_indent(check);
 }
 
-/// Backspace in a list item's indent takes the whole indent unit at once; elsewhere one character.
+/// Backspace in a line's indent takes a whole indent at once (a list's own, or the tab size);
+/// elsewhere one character.
 fn backspace_indent(check: &mut Check) {
     let dir = tempfile::tempdir().expect("temp dir");
     fs::write(dir.path().join("list.md"), "- top\n    - nested").expect("write");
@@ -179,6 +180,19 @@ fn backspace_indent(check: &mut Check) {
         "end backspace",
         "markdown: backspace after text takes one character",
         "- top\n- neste",
+    );
+
+    // In code, by the tab size.
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("f.rs"), "fn f() {\n        g();\n}\n").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter");
+    expect_text(
+        check,
+        window,
+        "down right right right right right right right right backspace",
+        "code: backspace in the indent takes a tab's width",
+        "fn f() {\n    g();\n}\n",
     );
 }
 

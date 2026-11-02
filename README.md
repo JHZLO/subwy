@@ -123,8 +123,8 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | Empty window | arrows, `Enter` | The recent folders are drawn as a subway map, a line for each folder they sit in: `Left` / `Right` move along a line, `Up` / `Down` to the nearest station on the next line; `Enter` or a click opens it |
 | Terminal | `Cmd+C`, `Cmd+V` | Copy the selection, paste |
 | | `Cmd+W`, `Cmd+Shift+[` / `]` | Close the terminal tab, previous / next terminal tab |
+| Editor | `Backspace` | In a line's leading spaces, back a whole indent at once (the tab size; in a Markdown list, the list's indent) |
 | Markdown | `Enter`, `Tab`, `Shift+Tab` | Continue a list, indent or outdent a list item |
-| | `Backspace` | In a line's leading spaces, back a whole indent at once (the list's indent, or the tab size) |
 | | `Cmd+B`, `Cmd+I` | Bold, italic |
 
 ## Settings

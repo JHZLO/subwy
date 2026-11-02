@@ -24,7 +24,9 @@ use subwy_project::{
 };
 
 use crate::{
-    keymap::{DeleteIndent, IndentItem, MARKDOWN, Newline, OutdentItem, ToggleBold, ToggleItalic},
+    keymap::{
+        DeleteIndent, EDITOR, IndentItem, MARKDOWN, Newline, OutdentItem, ToggleBold, ToggleItalic,
+    },
     preview::Preview,
     theme::{self, Palette, c, size, z},
 };
@@ -1379,12 +1381,18 @@ impl EditorTabs {
         preview.update(cx, |preview, cx| preview.show(source, folder, cx));
     }
 
-    /// The active tab's editor when it is Markdown, has the keyboard and takes edits. Anything
-    /// else (the find bar, a read-only file, an IME composition) keeps gpui-kit's own keys.
-    fn markdown_editor(&self, window: &mut Window, cx: &mut App) -> Option<Entity<EditorState>> {
+    /// The active tab's editor when it has the keyboard and takes edits, and is Markdown if
+    /// `markdown`. Anything else (the find bar, a read-only file, an IME composition) keeps
+    /// gpui-kit's own keys.
+    fn typing_editor(
+        &self,
+        markdown: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Entity<EditorState>> {
         let tab = self
             .active_tab()
-            .filter(|t| t.is_markdown() && !t.read_only)?;
+            .filter(|t| (t.is_markdown() || !markdown) && !t.read_only)?;
         let editor = tab.editor.clone();
         if !editor.focus_handle(cx).is_focused(window) {
             return None;
@@ -1395,28 +1403,41 @@ impl EditorTabs {
         (!composing).then_some(editor)
     }
 
-    /// Runs a Markdown editing key. `edit` gets the text and the selection and says what to
-    /// change, relative to an offset. With nothing to change the key propagates, and GPUI goes on
-    /// to gpui-kit's binding for the same key (its newline, its tab).
+    /// Runs a Markdown editing key; see [`Self::edit_text`].
     fn edit_markdown(
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
         edit: impl FnOnce(&Rope, Range<usize>) -> Option<(usize, Edit)>,
     ) {
-        let applied = self.markdown_editor(window, cx).is_some_and(|editor| {
-            editor.update(cx, |state, cx| {
-                let Some((base, edit)) = edit(state.text(), state.selected_range()) else {
-                    return false;
-                };
-                // A single replace, so one undo takes it back.
-                state.set_selected_range(base + edit.range.start..base + edit.range.end, cx);
-                state.replace(edit.text, window, cx);
-                let selection = edit.selection;
-                state.set_selected_range(base + selection.start..base + selection.end, cx);
-                true
-            })
-        });
+        self.edit_text(true, window, cx, edit);
+    }
+
+    /// Runs an editing key, in Markdown tabs only if `markdown`. `edit` gets the text and the
+    /// selection and says what to change, relative to an offset. With nothing to change the key
+    /// propagates, and GPUI goes on to gpui-kit's binding for the same key (its newline, its tab).
+    fn edit_text(
+        &self,
+        markdown: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&Rope, Range<usize>) -> Option<(usize, Edit)>,
+    ) {
+        let applied = self
+            .typing_editor(markdown, window, cx)
+            .is_some_and(|editor| {
+                editor.update(cx, |state, cx| {
+                    let Some((base, edit)) = edit(state.text(), state.selected_range()) else {
+                        return false;
+                    };
+                    // A single replace, so one undo takes it back.
+                    state.set_selected_range(base + edit.range.start..base + edit.range.end, cx);
+                    state.replace(edit.text, window, cx);
+                    let selection = edit.selection;
+                    state.set_selected_range(base + selection.start..base + selection.end, cx);
+                    true
+                })
+            });
         if !applied {
             cx.propagate();
         }
@@ -1424,13 +1445,18 @@ impl EditorTabs {
 
     fn delete_indent(&mut self, _: &DeleteIndent, window: &mut Window, cx: &mut Context<Self>) {
         let tab = crate::settings(cx).tab_size;
-        self.edit_markdown(window, cx, |text, selection| {
+        let in_markdown = self.active_tab().is_some_and(|t| t.is_markdown());
+        self.edit_text(false, window, cx, |text, selection| {
             if !selection.is_empty() {
                 return None;
             }
             let (row, start, line) = line_at(text, selection.start);
-            markdown::unindent(&line, selection.start - start, &list_unit(text, row), tab)
-                .map(|edit| (start, edit))
+            // A Markdown list goes back by its own indent; code by the tab size.
+            let unit = match in_markdown {
+                true => list_unit(text, row),
+                false => " ".repeat(tab),
+            };
+            markdown::unindent(&line, selection.start - start, &unit, tab).map(|edit| (start, edit))
         });
     }
 
@@ -1721,7 +1747,8 @@ impl Render for EditorTabs {
             )
             .capture_action(
                 cx.listener(|this, _: &MoveUp, window, cx| this.past_edge(false, window, cx)),
-            );
+            )
+            .on_action(cx.listener(Self::delete_indent));
         let body = match self.active_tab() {
             None => body.bg(c(p.paper)),
             Some(tab) => {
@@ -1748,7 +1775,6 @@ impl Render for EditorTabs {
                         .on_action(cx.listener(Self::newline))
                         .on_action(cx.listener(Self::indent_item))
                         .on_action(cx.listener(Self::outdent_item))
-                        .on_action(cx.listener(Self::delete_indent))
                         .on_action(cx.listener(|this, _: &ToggleBold, window, cx| {
                             this.toggle_emphasis(Emphasis::Bold, window, cx)
                         }))
@@ -1758,7 +1784,7 @@ impl Render for EditorTabs {
                         .bg(c(p.paper))
                         .child(editor)
                 } else {
-                    body.bg(c(p.paper)).child(editor)
+                    body.key_context(EDITOR).bg(c(p.paper)).child(editor)
                 }
             }
         };

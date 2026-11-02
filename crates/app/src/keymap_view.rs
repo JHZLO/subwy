@@ -24,8 +24,9 @@ fn section(action: &str) -> Option<(usize, &'static str, &'static str)> {
     match action.split_once("::")?.0 {
         "workspace" => Some((0, "Anywhere", keymap::WORKSPACE)),
         "project_panel" => Some((1, "Tree", keymap::PROJECT_PANEL)),
-        "markdown" => Some((2, "Markdown", "Markdown > Input")),
-        "terminal" => Some((3, "Terminal", keymap::TERMINAL)),
+        "editor" => Some((2, "Editor", "Editor > Input")),
+        "markdown" => Some((3, "Markdown", "Markdown > Input")),
+        "terminal" => Some((4, "Terminal", keymap::TERMINAL)),
         _ => None,
     }
 }

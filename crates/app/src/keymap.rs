@@ -88,21 +88,21 @@ actions!(
     ]
 );
 
-/// Around the editor of a Markdown tab.
-pub const MARKDOWN: &str = "Markdown";
+/// Around the editor of any tab.
+pub const EDITOR: &str = "Editor";
+/// gpui-kit's editor ("Input") in any tab.
+const EDITOR_INPUT: &str = "Editor > Input";
+
+actions!(editor, [DeleteIndent]);
+
+/// Around the editor of a Markdown tab, which is an editor too.
+pub const MARKDOWN: &str = "Editor Markdown";
 /// gpui-kit's editor ("Input") inside a Markdown tab.
 const MARKDOWN_EDITOR: &str = "Markdown > Input";
 
 actions!(
     markdown,
-    [
-        Newline,
-        IndentItem,
-        OutdentItem,
-        DeleteIndent,
-        ToggleBold,
-        ToggleItalic
-    ]
+    [Newline, IndentItem, OutdentItem, ToggleBold, ToggleItalic]
 );
 
 /// Binds the user's extra keys from the settings file. Returns the first one that could not be bound.
@@ -228,7 +228,7 @@ fn own_keys() -> Vec<Own> {
         own("enter", Newline, Some(MARKDOWN_EDITOR)),
         own("tab", IndentItem, Some(MARKDOWN_EDITOR)),
         own("shift-tab", OutdentItem, Some(MARKDOWN_EDITOR)),
-        own("backspace", DeleteIndent, Some(MARKDOWN_EDITOR)),
+        own("backspace", DeleteIndent, Some(EDITOR_INPUT)),
         own("cmd-b", ToggleBold, Some(MARKDOWN_EDITOR)),
         own("cmd-i", ToggleItalic, Some(MARKDOWN_EDITOR)),
         // The terminal (IntelliJ's Alt+F12). Keys without a binding go to the shell.
