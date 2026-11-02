@@ -739,22 +739,39 @@ impl EditorTabs {
     pub fn save_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(tab) = self.active_tab() {
             let id = tab.editor.entity_id();
-            self.save(id, false, false, window, cx);
+            self.save(id, false, false, true, window, cx).detach();
         }
     }
 
-    /// Writes the tab to disk. Unless `overwrite`, asks first when the file changed on disk since it
-    /// was read or written; `then_close` closes the tab once the file is written.
+    /// Auto-save: writes every edited tab that can be written without asking. A tab whose file
+    /// changed on disk, or was moved to the Trash from the tree, keeps its edits.
+    pub fn save_edited(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<Task<()>> {
+        let edited: Vec<EntityId> = self
+            .tabs
+            .iter()
+            .filter(|t| t.dirty && !t.read_only && !t.deleted && t.conflict.is_none())
+            .map(|t| t.editor.entity_id())
+            .collect();
+        edited
+            .into_iter()
+            .map(|id| self.save(id, false, false, false, window, cx))
+            .collect()
+    }
+
+    /// Writes the tab to disk. Unless `overwrite`, the file must not have changed on disk since it
+    /// was read or written: `ask` asks whether to replace it, otherwise the tab stays edited.
+    /// `then_close` closes the tab once the file is written.
     fn save(
         &mut self,
         id: EntityId,
         overwrite: bool,
         then_close: bool,
+        ask: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Task<()> {
         let Some(index) = self.index_of(id) else {
-            return;
+            return Task::ready(());
         };
         let tab = &mut self.tabs[index];
         if tab.read_only {
@@ -764,11 +781,11 @@ impl EditorTabs {
             ));
             cx.emit(TabsChanged);
             cx.notify();
-            return;
+            return Task::ready(());
         }
         // One write per tab at a time, so an older text never lands after a newer one.
         if tab.saving {
-            return;
+            return Task::ready(());
         }
         tab.saving = true;
         let edits = tab.edits;
@@ -788,17 +805,18 @@ impl EditorTabs {
         cx.spawn_in(window, async move |this, cx| {
             let saved = task.await;
             let _ = this.update_in(cx, |this, window, cx| {
-                this.finish_save(id, edits, then_close, saved, window, cx)
+                this.finish_save(id, edits, then_close, ask, saved, window, cx)
             });
         })
-        .detach();
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn finish_save(
         &mut self,
         id: EntityId,
         edits: u64,
         then_close: bool,
+        ask: bool,
         saved: Saved,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -823,7 +841,13 @@ impl EditorTabs {
                     self.remove_tab(index, window, cx);
                 }
             }
-            Saved::ChangedOnDisk => self.confirm_overwrite(id, then_close, window, cx),
+            Saved::ChangedOnDisk if ask => self.confirm_overwrite(id, then_close, window, cx),
+            Saved::ChangedOnDisk => {
+                self.error = Some(format!(
+                    "{}: changed on disk, not saved",
+                    tab.path.display()
+                ));
+            }
             Saved::Failed(err) => {
                 self.error = Some(format!("{}: {err}", tab.path.display()));
             }
@@ -847,7 +871,9 @@ impl EditorTabs {
         // Each choice closes the dialog itself first, so focus is back in the editor before the tab changes.
         let overwrite = move |window: &mut Window, cx: &mut App| {
             window.close_dialog(cx);
-            let _ = this.update(cx, |tabs, cx| tabs.save(id, true, then_close, window, cx));
+            let _ = this.update(cx, |tabs, cx| {
+                tabs.save(id, true, then_close, true, window, cx).detach()
+            });
         };
         window.open_alert_dialog(cx, move |alert, _, cx| {
             let ok = overwrite.clone();
@@ -977,7 +1003,9 @@ impl EditorTabs {
             let this = this.clone();
             move |window: &mut Window, cx: &mut App| {
                 window.close_dialog(cx);
-                let _ = this.update(cx, |tabs, cx| tabs.save(id, false, true, window, cx));
+                let _ = this.update(cx, |tabs, cx| {
+                    tabs.save(id, false, true, true, window, cx).detach()
+                });
             }
         };
         let discard = move |window: &mut Window, cx: &mut App| {

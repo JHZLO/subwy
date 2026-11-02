@@ -225,6 +225,12 @@ fn editor_page(cx: &App) -> SettingPage {
                 |s, on| s.hard_tabs = on,
             ),
         ]),
+        SettingGroup::new().title("Saving").items([switch(
+            "Save automatically",
+            "Edited files save when subwy loses focus, and before a window closes or subwy quits.",
+            |s| s.auto_save,
+            |s, on| s.auto_save = on,
+        )]),
         SettingGroup::new().title("Display").items([
             switch(
                 "Line numbers",

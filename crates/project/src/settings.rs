@@ -29,6 +29,8 @@ pub struct Settings {
     pub folding: bool,
     /// A Markdown file's headings as stations on a line beside the text.
     pub outline: bool,
+    /// Edited files save when subwy loses focus, and before a window closes or subwy quits.
+    pub auto_save: bool,
     /// Light, dark, or as macOS is set.
     pub appearance: Appearance,
     /// The key hint line under the tree.
@@ -211,6 +213,7 @@ impl Default for Settings {
             indent_guides: true,
             folding: true,
             outline: true,
+            auto_save: true,
             appearance: Appearance::System,
             key_hints: true,
             show_ignored: true,

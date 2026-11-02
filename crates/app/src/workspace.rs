@@ -33,6 +33,7 @@ use crate::{
 };
 
 /// What to do once unsaved changes may be dropped.
+#[derive(Clone, Copy)]
 enum AfterDiscard {
     Quit,
     CloseWindow,
@@ -374,6 +375,11 @@ impl Workspace {
             }),
             cx.observe_window_appearance(window, |_, window, cx| {
                 theme::apply_appearance(Some(window), cx);
+            }),
+            cx.observe_window_activation(window, |this, window, cx| {
+                if !window.is_window_active() && crate::settings(cx).auto_save {
+                    this.save_edited(window, cx);
+                }
             }),
         ];
         // The close button asks first when tabs have unsaved changes.
@@ -757,28 +763,83 @@ impl Workspace {
         .detach();
     }
 
-    /// True when nothing would be lost. Otherwise asks, and does `then` only if the user discards.
+    /// Auto-save, when the window loses focus: writes the edited tabs that need no question.
+    pub fn save_edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let saves = self
+            .tabs
+            .update(cx, |tabs, cx| tabs.save_edited(window, cx));
+        saves.into_iter().for_each(Task::detach);
+    }
+
+    /// Tabs with unsaved changes that `then` would close: this window's, or every window's.
+    fn unsaved(&self, then: AfterDiscard, cx: &App) -> usize {
+        let others: usize = match then {
+            AfterDiscard::CloseWindow => 0,
+            AfterDiscard::Quit => live_windows(cx)
+                .iter()
+                .filter(|(handle, _)| *handle != self.window)
+                .map(|(_, workspace)| workspace.read(cx).tabs.read(cx).tabs_unsaved())
+                .sum(),
+        };
+        self.tabs.read(cx).tabs_unsaved() + others
+    }
+
+    /// True when nothing would be lost. Otherwise, with auto-save, writes what it can first; asks
+    /// about the rest (a file changed on disk, a failed write), and does `then` only if the user
+    /// discards it.
     fn confirm_discard(
         &mut self,
         then: AfterDiscard,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let unsaved = match then {
-            AfterDiscard::CloseWindow => self.tabs.read(cx).tabs_unsaved(),
-            // Quitting closes every window, so it counts them all.
-            AfterDiscard::Quit => {
-                let others: usize = live_windows(cx)
-                    .iter()
-                    .filter(|(handle, _)| *handle != self.window)
-                    .map(|(_, workspace)| workspace.read(cx).tabs.read(cx).tabs_unsaved())
-                    .sum();
-                self.tabs.read(cx).tabs_unsaved() + others
-            }
-        };
-        if unsaved == 0 {
+        if self.unsaved(then, cx) == 0 {
             return true;
         }
+        if !crate::settings(cx).auto_save {
+            self.ask_discard(then, window, cx);
+            return false;
+        }
+        let mut saves = self
+            .tabs
+            .update(cx, |tabs, cx| tabs.save_edited(window, cx));
+        if matches!(then, AfterDiscard::Quit) {
+            for (handle, workspace) in live_windows(cx) {
+                if handle == self.window {
+                    continue;
+                }
+                let _ = handle.update(cx, |_, window, cx| {
+                    let more = workspace.update(cx, |workspace, cx| {
+                        workspace
+                            .tabs
+                            .update(cx, |tabs, cx| tabs.save_edited(window, cx))
+                    });
+                    saves.extend(more);
+                });
+            }
+        }
+        cx.spawn_in(window, async move |this, cx| {
+            for save in saves {
+                save.await;
+            }
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.unsaved(then, cx) == 0 {
+                    match then {
+                        AfterDiscard::Quit => cx.quit(),
+                        AfterDiscard::CloseWindow => window.remove_window(),
+                    }
+                } else {
+                    this.ask_discard(then, window, cx);
+                }
+            });
+        })
+        .detach();
+        false
+    }
+
+    /// Asks whether to drop the unsaved changes, and does `then` if the user discards them.
+    fn ask_discard(&mut self, then: AfterDiscard, window: &mut Window, cx: &mut Context<Self>) {
+        let unsaved = self.unsaved(then, cx);
         let detail = if unsaved == 1 {
             "1 file has unsaved changes.".to_string()
         } else {
@@ -801,7 +862,6 @@ impl Workspace {
             });
         })
         .detach();
-        false
     }
 
     /// What reopens next time: the folder, the tree, the tabs.
