@@ -499,6 +499,10 @@ fn drag_and_drop(check: &mut Check) {
     let typed = crate::terminal::wait_for(check, window, |lines| {
         lines.concat().contains("docs/notes.md")
     });
+    if !typed {
+        let shown = check.workspace(window, |w, cx| w.terminal_lines(cx));
+        eprintln!("the terminal shows: {shown:?}");
+    }
     check.expect_eq("a row dropped on the terminal types its path", typed, true);
     check.shot(window, "tree-15-dropped");
 }

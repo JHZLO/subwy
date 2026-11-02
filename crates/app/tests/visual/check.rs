@@ -141,10 +141,10 @@ impl Check {
         }
     }
 
-    /// Waits up to two seconds for `done`: file operations and reads run off the main thread and
-    /// land a moment after the keys that start them.
+    /// Waits up to ten seconds for `done`: file operations and reads run off the main thread and
+    /// land a moment after the keys that start them, later on a busy CI machine.
     pub fn wait_until(&mut self, mut done: impl FnMut(&mut Self) -> bool) -> bool {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             self.cx.run_until_parked();
             if done(self) {

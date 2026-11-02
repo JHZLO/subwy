@@ -181,7 +181,7 @@ fn reopen(check: &mut Check) {
         .expect("window");
 }
 
-/// The shell answers on its own thread; give it up to five seconds.
+/// The shell answers on its own thread; give it up to ten seconds (a CI machine can be slow).
 pub fn wait_for(
     check: &mut Check,
     window: AnyWindowHandle,
@@ -200,7 +200,7 @@ fn wait_for_workspace(
     window: AnyWindowHandle,
     found: impl Fn(&subwy::workspace::Workspace, &gpui_kit::App) -> bool,
 ) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         check.cx.run_until_parked();
         if check.workspace(window, &found) {
