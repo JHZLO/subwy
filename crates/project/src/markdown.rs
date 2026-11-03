@@ -1,8 +1,12 @@
-//! Markdown editing helpers: continuing lists on Enter, indenting list items, wrapping a selection.
-//! Pure: a line (or the lines around a selection) in, an [`Edit`] out; the app applies it.
-//! Offsets are bytes, as the editor counts them.
+//! Markdown editing helpers: continuing lists on Enter, indenting list items, wrapping a selection,
+//! following a link. Pure: a line (or the lines around a selection) in, an [`Edit`] out; the app
+//! applies it. Offsets are bytes, as the editor counts them.
 
-use std::ops::Range;
+use std::{
+    fmt::Write as _,
+    ops::Range,
+    path::{Component, Path, PathBuf},
+};
 
 /// Replace `range` with `text`, then select `selection` (in the text after the edit).
 /// Both are relative to the start of the text the helper was given.
@@ -321,6 +325,136 @@ pub fn toggle_emphasis(text: &str, selection: Range<usize>, emphasis: Emphasis) 
     }
 }
 
+/// Where a link leads: a page for the browser, or a file on disk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Link {
+    Web(String),
+    File(PathBuf),
+}
+
+/// The inline link (`[text](target)`, or an image) at `column` of `line`: where it is in the line,
+/// and its target as written, without angle brackets or a title.
+pub fn link_at(line: &str, column: usize) -> Option<(Range<usize>, String)> {
+    let mut from = 0;
+    while let Some(found) = line[from..].find("](") {
+        let middle = from + found;
+        from = middle + 2;
+        let (Some(start), Some((target, end))) =
+            (line[..middle].rfind('['), link_target(line, middle + 2))
+        else {
+            continue;
+        };
+        if (start..end).contains(&column) {
+            return Some((start..end, target));
+        }
+    }
+    None
+}
+
+/// The target of a link whose `(` ends at `open`, and where the link ends, after its `)`.
+fn link_target(line: &str, open: usize) -> Option<(String, usize)> {
+    let rest = &line[open..];
+    if let Some(inner) = rest.strip_prefix('<') {
+        let close = inner.find('>')?;
+        let end = open + 1 + close + 1 + inner[close + 1..].find(')')? + 1;
+        return Some((inner[..close].to_string(), end));
+    }
+    // Parentheses inside a target pair up (`wiki/Rust_(language)`); a space starts the title.
+    let mut depth = 0;
+    let mut target_end = None;
+    for (i, ch) in rest.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' if depth == 0 => {
+                let target = &rest[..target_end.unwrap_or(i)];
+                return Some((target.to_string(), open + i + 1));
+            }
+            ')' => depth -= 1,
+            ch if ch.is_whitespace() && target_end.is_none() => target_end = Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Where a link's `target` leads from a file in the folder `dir`. A target with a scheme
+/// (`https:`, `mailto:`) is for the browser; any other is a path, from `dir` unless absolute, with
+/// `%20` and the like decoded, `.` and `..` resolved and a `#heading` dropped. `None` for a heading
+/// of the same file (`#intro`) or an empty target.
+pub fn follow(dir: &Path, target: &str) -> Option<Link> {
+    let target = target.trim();
+    if has_scheme(target) {
+        return Some(Link::Web(target.to_string()));
+    }
+    let path = target.split(['#', '?']).next().unwrap_or_default();
+    if path.is_empty() {
+        return None;
+    }
+    let mut resolved = PathBuf::new();
+    for part in dir.join(percent_decode(path)).components() {
+        match part {
+            Component::ParentDir => {
+                resolved.pop();
+            }
+            Component::CurDir => {}
+            part => resolved.push(part),
+        }
+    }
+    Some(Link::File(resolved))
+}
+
+/// `target` starts with a URI scheme: a letter, then letters, digits, `+`, `-` or `.`, then `:`.
+fn has_scheme(target: &str) -> bool {
+    target.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.starts_with(|ch: char| ch.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.'))
+    })
+}
+
+/// `text` with every byte but letters, digits and `-._~` written as `%XX`, so it fits in a URI.
+pub fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(char::from(byte))
+            }
+            _ => {
+                let _ = write!(out, "%{byte:02X}");
+            }
+        }
+    }
+    out
+}
+
+/// `text` with its `%XX` escapes turned back into the bytes they stand for; a `%` that starts none
+/// stays as it is.
+pub fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let escaped = (bytes[i] == b'%')
+            .then(|| bytes.get(i + 1..i + 3))
+            .flatten()
+            .filter(|hex| hex.iter().all(u8::is_ascii_hexdigit))
+            .and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
+        match escaped {
+            Some(byte) => {
+                out.push(byte);
+                i += 3;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,5 +712,70 @@ mod tests {
         assert_eq!(section_at(&headings, 1), Some(0));
         assert_eq!(section_at(&headings, 2), Some(0));
         assert_eq!(section_at(&headings, 4), Some(1));
+    }
+
+    /// The link at the `|` in `line`, as its text and target.
+    fn link_under(line: &str) -> Option<(String, String)> {
+        let column = line.find('|').expect("caret");
+        let line = line.replace('|', "");
+        link_at(&line, column).map(|(range, target)| (line[range].to_string(), target))
+    }
+
+    #[test]
+    fn the_link_under_the_caret() {
+        let found = |link: &str, target: &str| Some((link.to_string(), target.to_string()));
+        assert_eq!(
+            link_under("see [the |guide](docs/guide.md) now"),
+            found("[the guide](docs/guide.md)", "docs/guide.md")
+        );
+        assert_eq!(
+            link_under("[a](a.md) and [b](b|.md \"title\")"),
+            found("[b](b.md \"title\")", "b.md")
+        );
+        assert_eq!(
+            link_under("![logo](<my logo.png>|)"),
+            found("[logo](<my logo.png>)", "my logo.png")
+        );
+        assert_eq!(
+            link_under("[Rust](https://en.wikipedia.org/wiki/Rust_(language)|)"),
+            found(
+                "[Rust](https://en.wikipedia.org/wiki/Rust_(language))",
+                "https://en.wikipedia.org/wiki/Rust_(language)"
+            )
+        );
+        assert_eq!(link_under("plain| [a](a.md)"), None);
+        assert_eq!(link_under("[not a link]|"), None);
+    }
+
+    #[test]
+    fn a_link_leads_to_a_page_or_a_file() {
+        let dir = Path::new("/notes/daily");
+        let file = |path: &str| Some(Link::File(PathBuf::from(path)));
+        assert_eq!(follow(dir, "todo.md"), file("/notes/daily/todo.md"));
+        assert_eq!(follow(dir, "../ideas/a.md#top"), file("/notes/ideas/a.md"));
+        assert_eq!(
+            follow(dir, "./my%20note.md"),
+            file("/notes/daily/my note.md")
+        );
+        assert_eq!(follow(dir, "/etc/hosts"), file("/etc/hosts"));
+        assert_eq!(
+            follow(dir, "https://example.com/a?b#c"),
+            Some(Link::Web("https://example.com/a?b#c".to_string()))
+        );
+        assert_eq!(
+            follow(dir, "mailto:me@example.com"),
+            Some(Link::Web("mailto:me@example.com".to_string()))
+        );
+        assert_eq!(follow(dir, "#heading"), None);
+        assert_eq!(follow(dir, ""), None);
+    }
+
+    #[test]
+    fn percent_escapes_go_both_ways() {
+        let target = "../\u{d55c}\u{ae00} note.md#a";
+        assert_eq!(percent_decode(&percent_encode(target)), target);
+        assert!(percent_encode(target).bytes().all(|b| b.is_ascii_graphic()));
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("%zz%41"), "%zzA");
     }
 }

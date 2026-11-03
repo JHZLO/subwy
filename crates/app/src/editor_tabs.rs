@@ -4,6 +4,7 @@ use std::{
     io,
     ops::Range,
     path::{Path, PathBuf},
+    rc::Rc,
 };
 
 use gpui_kit::component::{
@@ -11,8 +12,8 @@ use gpui_kit::component::{
     button::Button,
     dialog::{DialogEntrance, DialogFooter},
     input::{
-        Editor, EditorState, Escape, InputEvent, MoveDown, MoveUp, Position, Rope, RopeExt as _,
-        TabSize,
+        DefinitionProvider, Editor, EditorState, Escape, InputEvent, MoveDown, MoveUp, Position,
+        Rope, RopeExt as _, TabSize,
     },
     tooltip::Tooltip,
 };
@@ -21,7 +22,7 @@ use subwy_project::{
     folders::Folders,
     fs::{self, FileStamp, LineEnding, MAX_HIGHLIGHT_BYTES, ReadError, TextFile},
     lines,
-    markdown::{self, Edit, Emphasis},
+    markdown::{self, Edit, Emphasis, Link},
     session::TabState,
 };
 
@@ -74,6 +75,42 @@ struct Occurrences {
     first: Range<usize>,
     last: Range<usize>,
     whole_word: bool,
+}
+
+/// The scheme of the URI a Markdown link's target rides in, from the editor's Cmd+click to
+/// [`EditorTabs::follow_link`]: gpui-kit's go to definition carries a place as a URI only.
+const LINK_SCHEME: &str = "subwy-link:";
+
+/// A Markdown tab's links as gpui-kit's go to definition sees them: the link under the pointer is
+/// the definition, so Cmd+hover underlines it and Cmd+click follows it.
+struct MarkdownLinks;
+
+impl DefinitionProvider for MarkdownLinks {
+    fn definitions(
+        &self,
+        text: &Rope,
+        offset: usize,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Task<anyhow::Result<Vec<lsp_types::LocationLink>>> {
+        let (_, start, line) = line_at(text, offset);
+        let link = markdown::link_at(&line, offset - start).and_then(|(range, target)| {
+            let uri = format!("{LINK_SCHEME}{}", markdown::percent_encode(&target))
+                .parse()
+                .ok()?;
+            let origin = lsp_types::Range::new(
+                text.offset_to_position(start + range.start),
+                text.offset_to_position(start + range.end),
+            );
+            Some(lsp_types::LocationLink {
+                origin_selection_range: Some(origin),
+                target_uri: uri,
+                target_range: origin,
+                target_selection_range: origin,
+            })
+        });
+        Task::ready(Ok(link.into_iter().collect()))
+    }
 }
 
 /// Something the workspace shows (title, stem, status) may have changed.
@@ -689,6 +726,9 @@ impl EditorTabs {
                 .folding(settings.folding)
                 .default_value(file.text)
         });
+        if markdown {
+            Self::follow_links(&editor, true, cx);
+        }
         let subscriptions = vec![
             cx.subscribe(&editor, |this, editor, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
@@ -958,6 +998,7 @@ impl EditorTabs {
                     state.set_highlighter(language.clone(), cx);
                     state.set_soft_wrap(wrap, window, cx);
                 });
+                Self::follow_links(&tab.editor, language == "markdown", cx);
                 tab.language = language;
             }
         }
@@ -1292,6 +1333,86 @@ impl EditorTabs {
         }
     }
 
+    /// Lets Cmd+click on a link in `editor` follow it ([`Self::follow_link`]) when `on`, as for a
+    /// Markdown tab; otherwise takes that away.
+    fn follow_links(editor: &Entity<EditorState>, on: bool, cx: &mut Context<Self>) {
+        let tabs = cx.entity().downgrade();
+        let id = editor.entity_id();
+        editor.update(cx, |state, _| {
+            let lsp = state.lsp_mut();
+            if !on {
+                lsp.definition_provider = None;
+                lsp.show_document = None;
+                return;
+            }
+            lsp.definition_provider = Some(Rc::new(MarkdownLinks));
+            lsp.show_document = Some(Rc::new(
+                move |params: &lsp_types::ShowDocumentParams, window: &mut Window, cx: &mut App| {
+                    let Some(target) = params.uri.as_str().strip_prefix(LINK_SCHEME) else {
+                        return false;
+                    };
+                    let target = markdown::percent_decode(target);
+                    let tabs = tabs.clone();
+                    // The editor is still handling the click; follow once it is done.
+                    window.defer(cx, move |window, cx| {
+                        let _ =
+                            tabs.update(cx, |tabs, cx| tabs.follow_link(id, &target, window, cx));
+                    });
+                    true
+                },
+            ));
+        });
+    }
+
+    /// Opens where a link in the tab of `editor` leads: a page in the browser, a file of the
+    /// window's folders in a tab, any other file as Finder would open it with subwy. A link to
+    /// nothing on disk does nothing.
+    fn follow_link(
+        &mut self,
+        editor: EntityId,
+        target: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(tab) = self.tabs.iter().find(|t| t.editor.entity_id() == editor) else {
+            return;
+        };
+        let Some(dir) = self.abs(&tab.path).parent().map(Path::to_path_buf) else {
+            return;
+        };
+        match markdown::follow(&dir, target) {
+            Some(Link::Web(url)) => cx.open_url(&url),
+            Some(Link::File(path)) if path.is_file() => match self.folders.relative(&path) {
+                Some(rel) => self.open(&rel, false, window, cx),
+                None => cx.defer(move |cx| {
+                    crate::workspace::open_path(&path, cx);
+                }),
+            },
+            _ => {}
+        }
+    }
+
+    /// A preview whose links follow from the tab it shows, as Cmd+click on them does in the editor.
+    fn new_preview(cx: &mut Context<Self>) -> Entity<Preview> {
+        let tabs = cx.entity().downgrade();
+        cx.new(|cx| {
+            Preview::new(
+                move |target, window, cx| {
+                    let (tabs, target) = (tabs.clone(), target.to_string());
+                    // The preview is still handling the click; follow once it is done.
+                    window.defer(cx, move |window, cx| {
+                        let _ = tabs.update(cx, |tabs, cx| {
+                            if let Some(editor) = tabs.active_tab().map(|t| t.editor.entity_id()) {
+                                tabs.follow_link(editor, &target, window, cx);
+                            }
+                        });
+                    });
+                },
+                cx,
+            )
+        })
+    }
+
     /// Puts the active tab's caret on `line` at `column`, both counted from one; past the end of
     /// the text, at its end.
     pub fn go_to_line(
@@ -1351,7 +1472,7 @@ impl EditorTabs {
     pub fn toggle_preview(&mut self, cx: &mut Context<Self>) {
         self.preview_only = false;
         if self.preview.take().is_none() {
-            self.preview = Some(cx.new(Preview::new));
+            self.preview = Some(Self::new_preview(cx));
             self.refresh_preview(cx);
         }
         cx.notify();
@@ -1371,7 +1492,7 @@ impl EditorTabs {
         if view == View::Editor {
             self.preview = None;
         } else if self.preview.is_none() {
-            self.preview = Some(cx.new(Preview::new));
+            self.preview = Some(Self::new_preview(cx));
             self.refresh_preview(cx);
         }
         self.preview_only = view == View::Preview;

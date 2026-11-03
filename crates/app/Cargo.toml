@@ -7,6 +7,8 @@ publish.workspace = true
 
 [dependencies]
 subwy-project.workspace = true
+anyhow.workspace = true
+lsp-types.workspace = true
 serde_json.workspace = true
 smol.workspace = true
 # The grammars subwy highlights; json comes with the base tree-sitter feature.

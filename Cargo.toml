@@ -11,12 +11,17 @@ publish = false
 subwy-project = { path = "crates/project" }
 # The terminal panel's emulation and shell I/O (the engine Zed and Alacritty use; Apache-2.0).
 alacritty_terminal = "=0.26.0"
+# Already in the graph through gpui-kit: the result its editor's go to definition hook returns.
+anyhow = "1"
 gpui-kit = "=0.7.3"
 # This Mac has only the Command Line Tools (no Xcode metal compiler), so shaders compile at startup.
 gpui-pre-platform = { version = "=0.3.9", features = ["runtime_shaders"] }
 ignore = "0.4"
 # Already in the graph (gpui, notify); asks macOS which folder a terminal tab's shell is in.
 libc = "0.2"
+# Already in the graph through gpui-kit: the types of its editor's go to definition hook, which
+# Cmd+click on a Markdown link goes through.
+lsp-types = "0.97"
 notify = "8.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

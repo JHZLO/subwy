@@ -132,6 +132,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Ctrl+G` | Select the word at the caret, then each next place it is as well, so typing changes them all (`Esc` to stop) |
 | Markdown | `Enter`, `Tab`, `Shift+Tab` | Continue a list, indent or outdent a list item |
 | | `Cmd+B`, `Cmd+I` | Bold, italic |
+| | `Cmd`-click a link | Follow it: a file opens in a tab (a click in the preview does the same), a web page in the browser |
 
 ## Settings
 

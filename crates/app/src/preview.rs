@@ -5,6 +5,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
+    sync::Arc,
     time::Duration,
 };
 
@@ -34,6 +35,9 @@ const REVEAL_FRAMES: u8 = 2;
 /// The custom block of an image on disk, see [`local_image`].
 const LOCAL_IMAGE: &str = "subwy-local-image";
 
+/// What a click on a link in the preview does with the link's target.
+type OnLink = Arc<dyn Fn(&str, &mut Window, &mut App) + Send + Sync>;
+
 pub struct Preview {
     state: Entity<TextViewState>,
     /// The Markdown editor shown; none when the active tab is not Markdown.
@@ -49,6 +53,8 @@ pub struct Preview {
     follow_pending: bool,
     /// The line the text view is revealing for the preview, until it reports where that line is.
     reveal: Rc<Cell<Option<Reveal>>>,
+    /// A click on a link: its target, as written, for the tabs to follow from the shown file.
+    on_link: OnLink,
     _state: Subscription,
 }
 
@@ -78,7 +84,10 @@ enum Target {
 }
 
 impl Preview {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        on_link: impl Fn(&str, &mut Window, &mut App) + Send + Sync + 'static,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let state = cx.new(|cx| TextViewState::markdown("", cx));
         // A parse that lands may be the one a move of the editor was waiting for.
         let _state = cx.observe(&state, |this, _, cx| this.line_up(cx));
@@ -92,6 +101,7 @@ impl Preview {
             top_line: None,
             follow_pending: false,
             reveal: Rc::default(),
+            on_link: Arc::new(on_link),
             _state,
         }
     }
@@ -202,10 +212,17 @@ impl Preview {
     fn text_view(&self, p: &Palette, cx: &App) -> TextView {
         let scroll = self.scroll.clone();
         let reveal = self.reveal.clone();
+        let on_link = self.on_link.clone();
         let top = z(TOP, cx);
         TextView::new(&self.state)
             .style(preview_style(p, cx))
             .markdown_extensions(self.extensions.clone())
+            // Instead of the browser for every link, which leaves a link to a file going nowhere.
+            .on_link_click(move |url, event, window, cx| {
+                if event.standard_click() {
+                    on_link(url, window, cx);
+                }
+            })
             // Called while the revealed line is off screen; it lands at once, no animation.
             .on_reveal(move |line, window, _| {
                 let Some(Reveal { edge, .. }) = reveal.take() else {
