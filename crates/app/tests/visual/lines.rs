@@ -1,4 +1,4 @@
-//! IntelliJ's line keys in a code tab: duplicate, delete and move lines.
+//! IntelliJ's line keys in a code tab: duplicate, delete, move and comment out lines.
 
 use std::fs;
 
@@ -43,5 +43,19 @@ pub fn run(check: &mut Check) {
         "cmd-z",
         "one undo takes a move back",
         "fn a() {}\nfn b() {}\nfn c() {}\n",
+    );
+    expect_text(
+        check,
+        window,
+        "cmd-up cmd-/ cmd-/",
+        "cmd-/ comments out the line and goes down, so it repeats",
+        "// fn a() {}\n// fn b() {}\nfn c() {}\n",
+    );
+    expect_text(
+        check,
+        window,
+        "cmd-up cmd-/",
+        "cmd-/ on a commented line takes the comment off",
+        "fn a() {}\n// fn b() {}\nfn c() {}\n",
     );
 }

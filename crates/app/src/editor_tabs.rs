@@ -26,8 +26,8 @@ use subwy_project::{
 
 use crate::{
     keymap::{
-        DeleteIndent, DeleteLine, DuplicateLine, EDITOR, IndentItem, MARKDOWN, MoveLineDown,
-        MoveLineUp, Newline, OutdentItem, ToggleBold, ToggleItalic,
+        CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, IndentItem, MARKDOWN,
+        MoveLineDown, MoveLineUp, Newline, OutdentItem, ToggleBold, ToggleItalic,
     },
     preview::Preview,
     theme::{self, Palette, c, size, z},
@@ -1483,6 +1483,24 @@ impl EditorTabs {
         });
     }
 
+    /// Cmd+/: comments out the lines under the selection in the tab's language, or takes the
+    /// comments off. A language without line comments (plain text, JSON) leaves the key alone.
+    fn comment_lines(&mut self, _: &CommentLines, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((open, close)) = self
+            .active_tab()
+            .and_then(|t| lines::comment_for(&t.language))
+        else {
+            cx.propagate();
+            return;
+        };
+        self.edit_text(false, window, cx, |text, selection| {
+            Some((
+                0,
+                lines::toggle_comment(&text.to_string(), selection, open, close),
+            ))
+        });
+    }
+
     /// Down on the last line goes to the end of the text and Up on the first to its start, as in
     /// macOS text views; gpui-kit's editor stays put there. Only the editor knows its rows (soft
     /// wrap, folds), so its own move runs first and a caret it left in place goes on.
@@ -1774,6 +1792,7 @@ impl Render for EditorTabs {
             .on_action(cx.listener(Self::delete_indent))
             .on_action(cx.listener(Self::duplicate_line))
             .on_action(cx.listener(Self::delete_line))
+            .on_action(cx.listener(Self::comment_lines))
             .on_action(
                 cx.listener(|this, _: &MoveLineUp, window, cx| this.move_line(true, window, cx)),
             )

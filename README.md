@@ -127,6 +127,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Cmd+D` | Duplicate the line, or the selection |
 | | `Cmd+Backspace` | Delete the line (every line the selection touches) |
 | | `Alt+Shift+Up` / `Down` | Move the line (every line the selection touches) up / down |
+| | `Cmd+/` | Comment out the lines, or take the comments off (`//`, `#`, `--` or `<!-- -->`, by the language) |
 | Markdown | `Enter`, `Tab`, `Shift+Tab` | Continue a list, indent or outdent a list item |
 | | `Cmd+B`, `Cmd+I` | Bold, italic |
 

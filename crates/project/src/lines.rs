@@ -1,6 +1,7 @@
-//! IntelliJ's line keys: duplicate, delete and move the lines under the selection. Pure, like
-//! [`crate::markdown`]: the whole text and the selection in, an [`Edit`] out; the app applies it.
-//! Offsets are bytes, as the editor counts them, and lines end in `\n` (files load with LF).
+//! IntelliJ's line keys: duplicate, delete, move and comment out the lines under the selection.
+//! Pure, like [`crate::markdown`]: the whole text and the selection in, an [`Edit`] out; the app
+//! applies it. Offsets are bytes, as the editor counts them, and lines end in `\n` (files load
+//! with LF).
 
 use std::ops::Range;
 
@@ -122,6 +123,97 @@ pub fn move_lines(text: &str, selection: Range<usize>, up: bool) -> Option<Edit>
     }
 }
 
+/// How a tab's language (its name, or its file's extension) comments out a line: what opens the
+/// comment, and what closes it where the line's end does not.
+pub fn comment_for(language: &str) -> Option<(&'static str, &'static str)> {
+    Some(match language {
+        "rs" | "kt" | "kts" | "java" | "typescript" | "tsx" | "javascript" | "jsx" | "go" | "c"
+        | "h" | "cpp" | "cc" | "hpp" | "swift" | "scala" | "dart" | "groovy" | "gradle"
+        | "scss" | "jsonc" => ("//", ""),
+        "py" | "sh" | "bash" | "zsh" | "toml" | "yaml" | "rb" | "r" | "pl" => ("#", ""),
+        "sql" | "lua" | "hs" => ("--", ""),
+        "markdown" | "html" | "htm" | "xml" | "svg" => ("<!--", "-->"),
+        "css" => ("/*", "*/"),
+        _ => return None,
+    })
+}
+
+/// Cmd+/: comments out the lines under the selection, or takes the comments off when every line
+/// with text has one. Blank lines among others stay as they are. The comment opens at the lines'
+/// least indent, so the openers line up. A lone caret then goes to the next line, as in IntelliJ,
+/// so the key repeats down a block.
+pub fn toggle_comment(text: &str, selection: Range<usize>, open: &str, close: &str) -> Edit {
+    let lines = lines(text, &selection);
+    let block = &text[lines.clone()];
+    let filled = |line: &&str| !line.trim().is_empty();
+    let all_blank = !block.split('\n').any(|line| filled(&line));
+    let touched = |line: &&str| all_blank || filled(line);
+    let commented = |line: &str| {
+        let line = line.trim();
+        line.starts_with(open) && line.ends_with(close)
+    };
+    let uncomment = !all_blank && block.split('\n').filter(touched).all(commented);
+    let indent = block
+        .split('\n')
+        .filter(touched)
+        .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+        .min()
+        .unwrap_or(0);
+    let changed = block
+        .split('\n')
+        .map(|line| match (touched(&line), uncomment) {
+            (false, _) => line.to_string(),
+            (true, true) => uncomment_line(line, open, close),
+            (true, false) => comment_line(line, indent, open, close),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let end = lines.start + changed.len();
+    let selection = if !selection.is_empty() {
+        lines.start..end
+    } else if lines.end < text.len() {
+        let column = text[lines.start..selection.start].chars().count();
+        let next = &text[lines.end + 1..line_end(text, lines.end + 1)];
+        let caret = end + 1 + at_column(next, column);
+        caret..caret
+    } else {
+        end..end
+    };
+    Edit {
+        range: lines,
+        text: changed,
+        selection,
+    }
+}
+
+/// `line` commented out from `indent`, a run of spaces and tabs every touched line starts with.
+fn comment_line(line: &str, indent: usize, open: &str, close: &str) -> String {
+    let (lead, body) = line.split_at(indent);
+    match (body.trim().is_empty(), close.is_empty()) {
+        (true, true) => format!("{lead}{open}"),
+        (true, false) => format!("{lead}{open} {close}"),
+        (false, true) => format!("{lead}{open} {body}"),
+        (false, false) => format!("{lead}{open} {body} {close}"),
+    }
+}
+
+/// `line` without its comment: the opener with a space after it, the closer with one before it.
+fn uncomment_line(line: &str, open: &str, close: &str) -> String {
+    let body = line.trim_start();
+    let lead = &line[..line.len() - body.len()];
+    let body = body.strip_prefix(open).unwrap_or(body);
+    let body = body.strip_prefix(' ').unwrap_or(body);
+    let body = match close.is_empty() {
+        true => body,
+        false => {
+            let body = body.trim_end();
+            let body = body.strip_suffix(close).unwrap_or(body);
+            body.strip_suffix(' ').unwrap_or(body)
+        }
+    };
+    format!("{lead}{body}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +299,42 @@ mod tests {
         assert_eq!(moved("a\n[b\n]c", false).as_deref(), Some("a\nc\n[b]"));
         assert_eq!(moved("|a\nb", true), None);
         assert_eq!(moved("a\n|b", false), None);
+    }
+
+    fn commented(marked: &str, open: &str, close: &str) -> String {
+        let (text, selection) = parse(marked);
+        apply(&text, toggle_comment(&text, selection, open, close))
+    }
+
+    #[test]
+    fn comment_toggles_lines_at_their_least_indent() {
+        // A lone caret goes down a line, so the key repeats down a block.
+        assert_eq!(
+            commented("fn a() {\n    b|();\n}", "//", ""),
+            "fn a() {\n    // b();\n}|"
+        );
+        assert_eq!(commented("    // b|();\nc", "//", ""), "    b();\nc|");
+        // A selection: every line it touches but the blank ones, still selected.
+        assert_eq!(
+            commented("[  a\n\n    b]\nc", "//", ""),
+            "[  // a\n\n  //   b]\nc"
+        );
+        // Off again once every line with text has one.
+        assert_eq!(
+            commented("[  // a\n\n  //   b]\nc", "//", ""),
+            "[  a\n\n    b]\nc"
+        );
+        assert_eq!(commented("|", "//", ""), "//|");
+    }
+
+    #[test]
+    fn comment_closes_where_the_language_needs_it() {
+        assert_eq!(commented("a|\nb", "<!--", "-->"), "<!-- a -->\nb|");
+        assert_eq!(commented("<!-- a -->|", "<!--", "-->"), "a|");
+        assert_eq!(comment_for("rs"), Some(("//", "")));
+        assert_eq!(comment_for("py"), Some(("#", "")));
+        assert_eq!(comment_for("markdown"), Some(("<!--", "-->")));
+        assert_eq!(comment_for("json"), None);
     }
 
     #[test]
