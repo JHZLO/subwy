@@ -171,7 +171,8 @@ first run; changes made to it by hand apply the next time subwy starts.
 `soft_wrap` is `markdown`, `all` or `none`; `appearance` is `system`, `light` or `dark`. An empty `terminal_shell`
 is your login shell, and a `null` `terminal_font_size` follows the editor's. With `auto_save`, edited files save when
 subwy loses focus or its terminal takes the keyboard, and before a window closes or subwy quits; a file changed on disk since it was opened is left
-unsaved (the status bar says so) and asked about when closing.
+unsaved (the status bar says so) and asked about when closing. Tabs mark unsaved edits with a dot only when
+`auto_save` is off.
 
 The Settings dialog's Keymap page lists every action with its keys: click a key and press the new one (`Esc`
 cancels), or remove or reset it. It writes `keymap` entries; one with `"unbind": true` takes a key away from

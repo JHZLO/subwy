@@ -1768,6 +1768,8 @@ impl EditorTabs {
 
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = theme::colors(cx);
+        // Auto-save writes the edits on its own, so there is nothing to mark, as in IntelliJ.
+        let mark_edited = !crate::settings(cx).auto_save;
         let tabs: Vec<_> = self
             .tabs
             .iter()
@@ -1792,7 +1794,7 @@ impl EditorTabs {
                     .when(!active, |el| el.hover(|style| style.text_color(c(p.ink))))
                     .when(tab.pass_through, |el| el.italic())
                     .child(div().when(tab.deleted, |el| el.line_through()).child(name))
-                    .when(tab.dirty, |el| {
+                    .when(tab.dirty && mark_edited, |el| {
                         el.child(
                             div()
                                 .flex_none()
