@@ -7,7 +7,7 @@ use gpui_kit::AnyWindowHandle;
 use crate::check::Check;
 
 /// Types `text` into the focused editor, one character at a time.
-fn type_text(check: &mut Check, window: AnyWindowHandle, text: &str) {
+pub fn type_text(check: &mut Check, window: AnyWindowHandle, text: &str) {
     check.cx.simulate_input(window, text);
 }
 

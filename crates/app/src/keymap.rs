@@ -102,6 +102,7 @@ actions!(
         MoveLineUp,
         MoveLineDown,
         CommentLines,
+        GoToLine,
     ]
 );
 
@@ -249,6 +250,7 @@ fn own_keys() -> Vec<Own> {
         own("alt-shift-up", MoveLineUp, Some(EDITOR_INPUT)),
         own("alt-shift-down", MoveLineDown, Some(EDITOR_INPUT)),
         own("cmd-/", CommentLines, Some(EDITOR_INPUT)),
+        own("cmd-l", GoToLine, Some(EDITOR_INPUT)),
         // The terminal (IntelliJ's Alt+F12). Keys without a binding go to the shell.
         own("alt-f12", ToggleTerminal, ws),
         own("cmd-c", CopySelection, Some(TERMINAL)),

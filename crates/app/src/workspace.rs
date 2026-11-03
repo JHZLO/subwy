@@ -19,9 +19,9 @@ use crate::{
     finder::{self, Finder, FinderEvent},
     keymap::{
         CloseSettings, CloseTab, Collapse, CopyFileName, CopyPath, CopyRelativePath, Expand,
-        FocusEditor, FocusTree, NewTerminal, NewWindow, NextTab, Open, OpenFolder, OpenSettings,
-        PrevTab, Quit, RevealInFinder, Save, SelectNext, SelectPrev, ToggleFinder, TogglePreview,
-        ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
+        FocusEditor, FocusTree, GoToLine, NewTerminal, NewWindow, NextTab, Open, OpenFolder,
+        OpenSettings, PrevTab, Quit, RevealInFinder, Save, SelectNext, SelectPrev, ToggleFinder,
+        TogglePreview, ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
     },
     project_panel::{DraggedItems, FileEvent, PanelEvent, ProjectPanel, ResizeDrag},
     search_panel::{self, SearchEvent, SearchPanel},
@@ -1262,12 +1262,32 @@ impl Workspace {
                         .update(cx, |tabs, cx| tabs.open(path, false, window, cx));
                     this.focus_editor_area(window, cx);
                 }
+                FinderEvent::GoToLine { line, column } => {
+                    let (line, column) = (*line, *column);
+                    this.close_overlay(true, window, cx);
+                    this.tabs
+                        .update(cx, |tabs, cx| tabs.go_to_line(line, column, window, cx));
+                }
                 FinderEvent::Dismiss => this.close_overlay(true, window, cx),
                 FinderEvent::FocusLost => this.close_overlay(false, window, cx),
             },
         );
         let focus = view.read(cx).focus_handle(cx);
         self.show_overlay(OverlayView::Finder(view), focus, subscription, window, cx);
+    }
+
+    /// Cmd+L (IntelliJ's Go to Line): the finder, started with a colon to ask for a line of the
+    /// active tab. The key works in the editor, which an open overlay would have taken the keyboard
+    /// from, so this opens the finder.
+    fn go_to_line(&mut self, _: &GoToLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_finder(&ToggleFinder, window, cx);
+        if let Some(Overlay {
+            view: OverlayView::Finder(finder),
+            ..
+        }) = &self.overlay
+        {
+            finder.update(cx, |finder, cx| finder.set_query(":", window, cx));
+        }
     }
 
     /// Opens the folder search over the window, or closes it and gives focus back.
@@ -1625,6 +1645,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::focus_tree))
             .on_action(cx.listener(Self::focus_editor))
             .on_action(cx.listener(Self::toggle_finder))
+            .on_action(cx.listener(Self::go_to_line))
             .on_action(cx.listener(Self::toggle_search))
             .on_action(cx.listener(Self::toggle_terminal))
             .on_action(cx.listener(Self::new_terminal))

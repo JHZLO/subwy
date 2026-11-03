@@ -1,8 +1,11 @@
-//! IntelliJ's line keys in a code tab: duplicate, delete, move and comment out lines.
+//! IntelliJ's line keys in a code tab: duplicate, delete, move and comment out lines, go to one.
 
 use std::fs;
 
-use crate::{check::Check, markdown::expect_text};
+use crate::{
+    check::Check,
+    markdown::{expect_text, type_text},
+};
 
 pub fn run(check: &mut Check) {
     let dir = tempfile::tempdir().expect("temp dir");
@@ -57,5 +60,27 @@ pub fn run(check: &mut Check) {
         "cmd-up cmd-/",
         "cmd-/ on a commented line takes the comment off",
         "fn a() {}\n// fn b() {}\nfn c() {}\n",
+    );
+
+    check.keys(window, "cmd-l");
+    type_text(check, window, "3");
+    check.shot(window, "go-to-line");
+    check.keys(window, "enter");
+    type_text(check, window, "X");
+    let got = check.workspace(window, |w, cx| w.active_text(cx));
+    check.expect_eq(
+        "cmd-l :3 puts the caret at the start of line 3",
+        got.as_deref(),
+        Some("fn a() {}\n// fn b() {}\nXfn c() {}\n"),
+    );
+    check.keys(window, "cmd-l");
+    type_text(check, window, "2:4");
+    check.keys(window, "enter");
+    type_text(check, window, "Y");
+    let got = check.workspace(window, |w, cx| w.active_text(cx));
+    check.expect_eq(
+        "cmd-l :2:4 puts it at line 2, column 4",
+        got.as_deref(),
+        Some("fn a() {}\n// Yfn b() {}\nXfn c() {}\n"),
     );
 }

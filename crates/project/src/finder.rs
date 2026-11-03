@@ -1,5 +1,5 @@
 //! How the finder shows a result: the file's name, and the folders on the way to it written as
-//! the stations of a route, from the window's own folder.
+//! the stations of a route, from the window's own folder. And the query that asks for a line.
 
 use std::ops::Range;
 
@@ -64,6 +64,20 @@ pub fn route(path: &str, positions: &[usize], window: Option<&str>) -> Route {
     }
 }
 
+/// A query for a line of the open file, as Cmd+L starts it (IntelliJ's Go to Line): `:12` or
+/// `:12:5`, the line and the column counted from one. `None` for a query of a file, or for a line
+/// still being typed.
+pub fn line_query(query: &str) -> Option<(u32, u32)> {
+    let rest = query.strip_prefix(':')?;
+    let (line, column) = rest.split_once(':').unwrap_or((rest, ""));
+    let line = line.trim().parse::<u32>().ok()?.max(1);
+    let column = match column.trim() {
+        "" => 1,
+        column => column.parse::<u32>().ok()?.max(1),
+    };
+    Some((line, column))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +113,18 @@ mod tests {
         let found = route("notes/queries/q.sql", &[], None);
         assert_eq!(found.stops, 2);
         assert_eq!(found.via, "via notes, queries");
+    }
+
+    #[test]
+    fn a_colon_asks_for_a_line() {
+        assert_eq!(line_query(":12"), Some((12, 1)));
+        assert_eq!(line_query(":12:5"), Some((12, 5)));
+        assert_eq!(line_query(": 3 "), Some((3, 1)));
+        assert_eq!(line_query(":0"), Some((1, 1)));
+        assert_eq!(line_query(":7:"), Some((7, 1)));
+        assert_eq!(line_query(":"), None);
+        assert_eq!(line_query(":x"), None);
+        assert_eq!(line_query("12"), None);
     }
 
     #[test]

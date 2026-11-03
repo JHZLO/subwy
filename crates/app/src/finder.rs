@@ -1,4 +1,5 @@
-//! The file finder (Cmd+Shift+O): type part of a path, pick a file, open it.
+//! The file finder (Cmd+Shift+O): type part of a path, pick a file, open it. Started with a colon
+//! (Cmd+L), it asks for a line of the open file instead.
 
 use std::{ops::Range, path::PathBuf, sync::Arc};
 
@@ -50,6 +51,8 @@ const MAX_ROWS: usize = 12;
 pub enum FinderEvent {
     /// Enter or a click picked this file, relative to the open folder.
     Open(PathBuf),
+    /// Enter on `:line` or `:line:column`, both counted from one.
+    GoToLine { line: u32, column: u32 },
     /// Escape: close and give focus back to where it was.
     Dismiss,
     /// Focus went elsewhere (a click outside, Cmd+1): close and leave it there.
@@ -112,8 +115,26 @@ impl Finder {
         }
     }
 
+    /// Starts the finder on `query`, as Cmd+L does with a colon.
+    pub fn set_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.input
+            .update(cx, |input, cx| input.set_value(query, window, cx));
+        self.refilter(cx);
+    }
+
+    /// The query asks for a line, not a file.
+    fn wants_line(&self, cx: &App) -> bool {
+        self.input.read(cx).value().starts_with(':')
+    }
+
     /// Searches off the main thread: a large folder takes a few milliseconds per keystroke.
     fn refilter(&mut self, cx: &mut Context<Self>) {
+        if self.wants_line(cx) {
+            self.search = Task::ready(());
+            self.found = fuzzy::Found::default();
+            cx.notify();
+            return;
+        }
         let Some(index) = self.index.clone() else {
             return;
         };
@@ -140,6 +161,13 @@ impl Finder {
     }
 
     fn open(&mut self, row: usize, cx: &mut Context<Self>) {
+        if self.wants_line(cx) {
+            let query = self.input.read(cx).value();
+            if let Some((line, column)) = finder::line_query(&query) {
+                cx.emit(FinderEvent::GoToLine { line, column });
+            }
+            return;
+        }
         let (Some(index), Some(found)) = (&self.index, self.found.matches.get(row)) else {
             return;
         };
@@ -323,9 +351,11 @@ impl Render for Finder {
                 .collect(),
             None => Vec::new(),
         };
-        let stations = match self.found.total {
-            1 => "1 station".to_string(),
-            n => format!("{n} stations"),
+        let wants_line = self.wants_line(cx);
+        let stations = match (wants_line, self.found.total) {
+            (true, _) => "line:column".to_string(),
+            (false, 1) => "1 station".to_string(),
+            (false, n) => format!("{n} stations"),
         };
         let input = Input::new(&self.input)
             .appearance(false)
@@ -360,7 +390,7 @@ impl Render for Finder {
                         el.border_b_1().border_color(c(p.line))
                     })
                     .child(div().flex_1().min_w_0().child(input))
-                    .when(self.index.is_some(), |el| {
+                    .when(self.index.is_some() || wants_line, |el| {
                         el.child(
                             div()
                                 .flex_none()

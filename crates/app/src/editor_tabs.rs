@@ -1277,6 +1277,23 @@ impl EditorTabs {
         }
     }
 
+    /// Puts the active tab's caret on `line` at `column`, both counted from one; past the end of
+    /// the text, at its end.
+    pub fn go_to_line(
+        &mut self,
+        line: u32,
+        column: u32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.active_tab().map(|t| t.editor.clone()) else {
+            return;
+        };
+        editor.update(cx, |state, cx| {
+            state.set_cursor_position(Position::new(line - 1, column - 1), window, cx)
+        });
+    }
+
     /// Reopens a saved session's tabs, each at its cursor, with `active` as the active tab.
     pub fn restore(
         &mut self,
