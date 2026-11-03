@@ -129,6 +129,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Alt+Shift+Up` / `Down` | Move the line (every line the selection touches) up / down |
 | | `Cmd+/` | Comment out the lines, or take the comments off (`//`, `#`, `--` or `<!-- -->`, by the language) |
 | | `Cmd+L` | Go to a line: the finder opens with `:`, type `12` or `12:5` (line, column) and `Enter` |
+| | `Ctrl+G` | Select the word at the caret, then each next place it is as well, so typing changes them all (`Esc` to stop) |
 | Markdown | `Enter`, `Tab`, `Shift+Tab` | Continue a list, indent or outdent a list item |
 | | `Cmd+B`, `Cmd+I` | Bold, italic |
 

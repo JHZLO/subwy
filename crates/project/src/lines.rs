@@ -1,5 +1,5 @@
-//! IntelliJ's line keys: duplicate, delete, move and comment out the lines under the selection.
-//! Pure, like [`crate::markdown`]: the whole text and the selection in, an [`Edit`] out; the app
+//! IntelliJ's line keys: duplicate, delete, move and comment out the lines under the selection,
+//! and select the next occurrence. Pure, like [`crate::markdown`]: the whole text and the selection in, an [`Edit`] out; the app
 //! applies it. Offsets are bytes, as the editor counts them, and lines end in `\n` (files load
 //! with LF).
 
@@ -214,6 +214,31 @@ fn uncomment_line(line: &str, open: &str, close: &str) -> String {
     format!("{lead}{body}")
 }
 
+/// Ctrl+G: where the text at `from` comes again after it, going round to the start; `None` when
+/// it is nowhere else. With `whole_word` (Ctrl+G took a word at the caret), a match inside a
+/// longer word does not count, as in IntelliJ.
+pub fn next_occurrence(text: &str, from: Range<usize>, whole_word: bool) -> Option<Range<usize>> {
+    let needle = &text[from.clone()];
+    if needle.is_empty() {
+        return None;
+    }
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let fits = |start: &usize| {
+        let end = start + needle.len();
+        !whole_word
+            || !(text[..*start].chars().next_back().is_some_and(word)
+                || text[end..].chars().next().is_some_and(word))
+    };
+    let after = text[from.end..]
+        .match_indices(needle)
+        .map(|(i, _)| from.end + i);
+    let before = text[..from.start].match_indices(needle).map(|(i, _)| i);
+    after
+        .chain(before)
+        .find(fits)
+        .map(|start| start..start + needle.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,6 +360,17 @@ mod tests {
         assert_eq!(comment_for("py"), Some(("#", "")));
         assert_eq!(comment_for("markdown"), Some(("<!--", "-->")));
         assert_eq!(comment_for("json"), None);
+    }
+
+    #[test]
+    fn next_occurrence_goes_round_and_keeps_to_words() {
+        let text = "foo bar foo food foo";
+        assert_eq!(next_occurrence(text, 0..3, false), Some(8..11));
+        // A word from the caret skips "food"; a selected "foo" does not.
+        assert_eq!(next_occurrence(text, 8..11, true), Some(17..20));
+        assert_eq!(next_occurrence(text, 8..11, false), Some(12..15));
+        assert_eq!(next_occurrence(text, 17..20, true), Some(0..3));
+        assert_eq!(next_occurrence("only once", 0..4, false), None);
     }
 
     #[test]

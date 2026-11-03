@@ -11,7 +11,8 @@ use gpui_kit::component::{
     button::Button,
     dialog::{DialogEntrance, DialogFooter},
     input::{
-        Editor, EditorState, InputEvent, MoveDown, MoveUp, Position, Rope, RopeExt as _, TabSize,
+        Editor, EditorState, Escape, InputEvent, MoveDown, MoveUp, Position, Rope, RopeExt as _,
+        TabSize,
     },
     tooltip::Tooltip,
 };
@@ -27,7 +28,8 @@ use subwy_project::{
 use crate::{
     keymap::{
         CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, IndentItem, MARKDOWN,
-        MoveLineDown, MoveLineUp, Newline, OutdentItem, ToggleBold, ToggleItalic,
+        MoveLineDown, MoveLineUp, Newline, OutdentItem, SelectNextOccurrence, ToggleBold,
+        ToggleItalic,
     },
     preview::Preview,
     theme::{self, Palette, c, size, z},
@@ -65,6 +67,15 @@ impl Tab {
     }
 }
 
+/// What Ctrl+G has selected in one editor: where it began, the occurrence it added last, and
+/// whether it matches whole words (it began from a caret).
+struct Occurrences {
+    editor: EntityId,
+    first: Range<usize>,
+    last: Range<usize>,
+    whole_word: bool,
+}
+
 /// Something the workspace shows (title, stem, status) may have changed.
 pub struct TabsChanged;
 
@@ -96,6 +107,9 @@ pub struct EditorTabs {
     focus_handle: FocusHandle,
     /// The last file that could not be opened, and why; shown in the status bar.
     pub error: Option<String>,
+    /// Ctrl+G's run: gpui-kit tells only the first of several selections, so the one added last
+    /// is kept here to go on from.
+    occurrences: Option<Occurrences>,
 }
 
 impl EventEmitter<TabsChanged> for EditorTabs {}
@@ -244,6 +258,7 @@ impl EditorTabs {
             split: 0.5,
             focus_handle: cx.focus_handle(),
             error: None,
+            occurrences: None,
         }
     }
 
@@ -1518,6 +1533,59 @@ impl EditorTabs {
         });
     }
 
+    /// Ctrl+G (IntelliJ's Add Selection for Next Occurrence): from a caret, selects its word; with
+    /// a selection, adds a selection on the next place the same text is, so typing changes them
+    /// all.
+    fn select_next(
+        &mut self,
+        _: &SelectNextOccurrence,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.typing_editor(false, window, cx) else {
+            cx.propagate();
+            return;
+        };
+        let id = editor.entity_id();
+        let (selection, text) = {
+            let state = editor.read(cx);
+            (state.selected_range(), state.text().to_string())
+        };
+        if selection.is_empty() {
+            let Some(word) = editor.read(cx).text().word_range(selection.start) else {
+                return;
+            };
+            self.occurrences = Some(Occurrences {
+                editor: id,
+                first: word.clone(),
+                last: word.clone(),
+                whole_word: true,
+            });
+            editor.update(cx, |state, cx| state.set_selected_range(word, cx));
+            return;
+        }
+        // Going on needs the same run: the same first selection, and the same text still at the
+        // last one (an edit since moves it).
+        let run = self.occurrences.take().filter(|run| {
+            run.editor == id
+                && run.first == selection
+                && text.get(run.last.clone()) == text.get(selection.clone())
+        });
+        let mut run = run.unwrap_or(Occurrences {
+            editor: id,
+            first: selection.clone(),
+            last: selection.clone(),
+            whole_word: false,
+        });
+        if let Some(next) = lines::next_occurrence(&text, run.last.clone(), run.whole_word)
+            && next != run.first
+        {
+            run.last = next.clone();
+            editor.update(cx, |state, cx| state.add_selection(next, cx));
+        }
+        self.occurrences = Some(run);
+    }
+
     /// Down on the last line goes to the end of the text and Up on the first to its start, as in
     /// macOS text views; gpui-kit's editor stays put there. Only the editor knows its rows (soft
     /// wrap, folds), so its own move runs first and a caret it left in place goes on.
@@ -1810,6 +1878,9 @@ impl Render for EditorTabs {
             .on_action(cx.listener(Self::duplicate_line))
             .on_action(cx.listener(Self::delete_line))
             .on_action(cx.listener(Self::comment_lines))
+            .on_action(cx.listener(Self::select_next))
+            // Escape drops the extra selections, and with them Ctrl+G's run.
+            .capture_action(cx.listener(|this, _: &Escape, _, _| this.occurrences = None))
             .on_action(
                 cx.listener(|this, _: &MoveLineUp, window, cx| this.move_line(true, window, cx)),
             )

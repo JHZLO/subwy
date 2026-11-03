@@ -1,4 +1,5 @@
-//! IntelliJ's line keys in a code tab: duplicate, delete, move and comment out lines, go to one.
+//! IntelliJ's line keys in a code tab: duplicate, delete, move and comment out lines, go to one,
+//! select the next occurrence.
 
 use std::fs;
 
@@ -82,5 +83,25 @@ pub fn run(check: &mut Check) {
         "cmd-l :2:4 puts it at line 2, column 4",
         got.as_deref(),
         Some("fn a() {}\n// Yfn b() {}\nXfn c() {}\n"),
+    );
+
+    next_occurrence(check);
+}
+
+/// Ctrl+G takes the caret's word, then the next place it is as a whole word, so typing changes both.
+fn next_occurrence(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("g.rs"), "let foo = foo + food;\n").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(
+        window,
+        "down down enter right right right right ctrl-g ctrl-g",
+    );
+    type_text(check, window, "bar");
+    let got = check.workspace(window, |w, cx| w.active_text(cx));
+    check.expect_eq(
+        "ctrl-g selects the word and its next whole-word match",
+        got.as_deref(),
+        Some("let bar = bar + food;\n"),
     );
 }
