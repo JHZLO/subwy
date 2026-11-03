@@ -36,6 +36,8 @@ pub struct Started {
 pub enum TerminalEvent {
     /// The shell exited; the panel has nothing left to show.
     Exited,
+    /// The panel took the keyboard.
+    Focused,
 }
 
 /// Where the grid sat in the last paint, for the mouse and the input method.
@@ -190,6 +192,9 @@ impl TerminalPanel {
             } else {
                 &b"\x1b[O"[..]
             });
+        }
+        if focused {
+            cx.emit(TerminalEvent::Focused);
         }
         cx.notify();
     }

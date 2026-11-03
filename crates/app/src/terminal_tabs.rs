@@ -32,6 +32,8 @@ pub enum TerminalTabsEvent {
     /// The last tab closed. `had_focus` says whether the terminal had the keyboard, so it can go
     /// to the editor.
     Empty { had_focus: bool },
+    /// A tab's shell took the keyboard.
+    Focused,
 }
 
 pub struct TerminalTabs {
@@ -80,6 +82,7 @@ impl TerminalTabs {
                         this.close(index, window, cx);
                     }
                 }
+                TerminalEvent::Focused => cx.emit(TerminalTabsEvent::Focused),
             },
         );
         let number = (1..)

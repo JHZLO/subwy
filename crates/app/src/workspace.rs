@@ -763,7 +763,8 @@ impl Workspace {
         .detach();
     }
 
-    /// Auto-save, when the window loses focus: writes the edited tabs that need no question.
+    /// Auto-save, when the window loses focus or the terminal takes it: writes the edited tabs that
+    /// need no question.
     pub fn save_edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let saves = self
             .tabs
@@ -1157,6 +1158,12 @@ impl Workspace {
                         this.focus_editor_area(window, cx);
                     }
                     cx.notify();
+                }
+                // As IntelliJ does on going to its terminal: what runs there sees the edits.
+                TerminalTabsEvent::Focused => {
+                    if crate::settings(cx).auto_save {
+                        this.save_edited(window, cx);
+                    }
                 }
             },
         );
