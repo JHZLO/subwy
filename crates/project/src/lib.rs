@@ -6,6 +6,7 @@ pub mod folders;
 pub mod fs;
 pub mod fuzzy;
 pub mod index;
+pub mod lines;
 pub mod markdown;
 pub mod nav;
 pub mod network;

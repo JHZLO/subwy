@@ -124,6 +124,9 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | Terminal | `Cmd+C`, `Cmd+V` | Copy the selection, paste |
 | | `Cmd+W`, `Cmd+Shift+[` / `]` | Close the terminal tab, previous / next terminal tab |
 | Editor | `Backspace` | In a line's leading spaces, back a whole indent at once (the tab size; in a Markdown list, the list's indent) |
+| | `Cmd+D` | Duplicate the line, or the selection |
+| | `Cmd+Backspace` | Delete the line (every line the selection touches) |
+| | `Alt+Shift+Up` / `Down` | Move the line (every line the selection touches) up / down |
 | Markdown | `Enter`, `Tab`, `Shift+Tab` | Continue a list, indent or outdent a list item |
 | | `Cmd+B`, `Cmd+I` | Bold, italic |
 

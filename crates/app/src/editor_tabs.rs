@@ -19,13 +19,15 @@ use gpui_kit::{assets::IconName, prelude::FluentBuilder as _, *};
 use subwy_project::{
     folders::Folders,
     fs::{self, FileStamp, LineEnding, MAX_HIGHLIGHT_BYTES, ReadError, TextFile},
+    lines,
     markdown::{self, Edit, Emphasis},
     session::TabState,
 };
 
 use crate::{
     keymap::{
-        DeleteIndent, EDITOR, IndentItem, MARKDOWN, Newline, OutdentItem, ToggleBold, ToggleItalic,
+        DeleteIndent, DeleteLine, DuplicateLine, EDITOR, IndentItem, MARKDOWN, MoveLineDown,
+        MoveLineUp, Newline, OutdentItem, ToggleBold, ToggleItalic,
     },
     preview::Preview,
     theme::{self, Palette, c, size, z},
@@ -1460,6 +1462,27 @@ impl EditorTabs {
         });
     }
 
+    /// Cmd+D: the selection, or the caret's line, again right after it.
+    fn duplicate_line(&mut self, _: &DuplicateLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_text(false, window, cx, |text, selection| {
+            Some((0, lines::duplicate(&text.to_string(), selection)))
+        });
+    }
+
+    /// Cmd+Backspace: the lines under the selection go.
+    fn delete_line(&mut self, _: &DeleteLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_text(false, window, cx, |text, selection| {
+            Some((0, lines::delete(&text.to_string(), selection)))
+        });
+    }
+
+    /// Alt+Shift+Up and Down: the lines under the selection trade places with the next one.
+    fn move_line(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_text(false, window, cx, |text, selection| {
+            lines::move_lines(&text.to_string(), selection, up).map(|edit| (0, edit))
+        });
+    }
+
     /// Down on the last line goes to the end of the text and Up on the first to its start, as in
     /// macOS text views; gpui-kit's editor stays put there. Only the editor knows its rows (soft
     /// wrap, folds), so its own move runs first and a caret it left in place goes on.
@@ -1748,7 +1771,15 @@ impl Render for EditorTabs {
             .capture_action(
                 cx.listener(|this, _: &MoveUp, window, cx| this.past_edge(false, window, cx)),
             )
-            .on_action(cx.listener(Self::delete_indent));
+            .on_action(cx.listener(Self::delete_indent))
+            .on_action(cx.listener(Self::duplicate_line))
+            .on_action(cx.listener(Self::delete_line))
+            .on_action(
+                cx.listener(|this, _: &MoveLineUp, window, cx| this.move_line(true, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &MoveLineDown, window, cx| this.move_line(false, window, cx)),
+            );
         let body = match self.active_tab() {
             None => body.bg(c(p.paper)),
             Some(tab) => {

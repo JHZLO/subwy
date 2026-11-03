@@ -93,7 +93,16 @@ pub const EDITOR: &str = "Editor";
 /// gpui-kit's editor ("Input") in any tab.
 const EDITOR_INPUT: &str = "Editor > Input";
 
-actions!(editor, [DeleteIndent]);
+actions!(
+    editor,
+    [
+        DeleteIndent,
+        DuplicateLine,
+        DeleteLine,
+        MoveLineUp,
+        MoveLineDown,
+    ]
+);
 
 /// Around the editor of a Markdown tab, which is an editor too.
 pub const MARKDOWN: &str = "Editor Markdown";
@@ -231,6 +240,13 @@ fn own_keys() -> Vec<Own> {
         own("backspace", DeleteIndent, Some(EDITOR_INPUT)),
         own("cmd-b", ToggleBold, Some(MARKDOWN_EDITOR)),
         own("cmd-i", ToggleItalic, Some(MARKDOWN_EDITOR)),
+        // IntelliJ's line keys, in any tab. gpui-kit gives Cmd+Backspace and Alt+Shift+Up/Down to
+        // its editor too (delete to the line start, add a cursor); these tie with those on depth
+        // and run first, and a line with nowhere to move propagates to them.
+        own("cmd-d", DuplicateLine, Some(EDITOR_INPUT)),
+        own("cmd-backspace", DeleteLine, Some(EDITOR_INPUT)),
+        own("alt-shift-up", MoveLineUp, Some(EDITOR_INPUT)),
+        own("alt-shift-down", MoveLineDown, Some(EDITOR_INPUT)),
         // The terminal (IntelliJ's Alt+F12). Keys without a binding go to the shell.
         own("alt-f12", ToggleTerminal, ws),
         own("cmd-c", CopySelection, Some(TERMINAL)),

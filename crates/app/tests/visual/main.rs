@@ -7,6 +7,7 @@ mod check;
 mod finder;
 mod folders;
 mod islands;
+mod lines;
 mod markdown;
 mod markdown_view;
 mod outline;
@@ -63,6 +64,7 @@ fn main() {
     finder::run(&mut check);
     tree::run(&mut check);
     markdown::run(&mut check);
+    lines::run(&mut check);
     search::run(&mut check);
     preview_sync::run(&mut check);
     windows::run(&mut check);

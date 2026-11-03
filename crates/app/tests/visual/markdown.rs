@@ -12,7 +12,7 @@ fn type_text(check: &mut Check, window: AnyWindowHandle, text: &str) {
 }
 
 /// Presses `keys` one at a time and checks the active tab's text afterwards.
-fn expect_text(check: &mut Check, window: AnyWindowHandle, keys: &str, what: &str, want: &str) {
+pub fn expect_text(check: &mut Check, window: AnyWindowHandle, keys: &str, what: &str, want: &str) {
     check.keys(window, keys);
     let got = check.workspace(window, |w, cx| w.active_text(cx));
     check.expect_eq(what, got.as_deref(), Some(want));
