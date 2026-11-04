@@ -160,6 +160,38 @@ pub fn run(check: &mut Check) {
     backspace_indent(check);
     pastes_pictures(check);
     pastes_links(check);
+    ticks_tasks(check);
+}
+
+/// Cmd+Enter makes a line a task, ticks it, and unticks it.
+fn ticks_tasks(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("note.md"), "").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter");
+
+    type_text(check, window, "buy milk");
+    expect_text(
+        check,
+        window,
+        "cmd-enter",
+        "markdown: cmd-enter makes a line a task",
+        "- [ ] buy milk",
+    );
+    expect_text(
+        check,
+        window,
+        "cmd-enter",
+        "markdown: cmd-enter ticks the task",
+        "- [x] buy milk",
+    );
+    expect_text(
+        check,
+        window,
+        "cmd-enter",
+        "markdown: cmd-enter unticks it",
+        "- [ ] buy milk",
+    );
 }
 
 /// A web address pasted over selected text makes the text its link; with nothing selected it

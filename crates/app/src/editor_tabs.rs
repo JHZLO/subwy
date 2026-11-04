@@ -30,7 +30,7 @@ use crate::{
     keymap::{
         CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, IndentItem, MARKDOWN,
         MoveLineDown, MoveLineUp, Newline, OutdentItem, SelectNextOccurrence, ToggleBold,
-        ToggleItalic,
+        ToggleItalic, ToggleTask,
     },
     preview::Preview,
     theme::{self, Palette, c, size, z},
@@ -1816,6 +1816,13 @@ impl EditorTabs {
         });
     }
 
+    /// Cmd+Enter: ticks or unticks the task boxes on the selected lines.
+    fn toggle_task(&mut self, _: &ToggleTask, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_markdown(window, cx, |text, selection| {
+            markdown::toggle_task(&text.to_string(), selection).map(|edit| (0, edit))
+        });
+    }
+
     fn toggle_emphasis(&mut self, emphasis: Emphasis, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_markdown(window, cx, |text, selection| {
             let (_, start, _) = line_at(text, selection.start);
@@ -2103,6 +2110,7 @@ impl Render for EditorTabs {
                         .on_action(cx.listener(|this, _: &ToggleItalic, window, cx| {
                             this.toggle_emphasis(Emphasis::Italic, window, cx)
                         }))
+                        .on_action(cx.listener(Self::toggle_task))
                         .bg(c(p.paper))
                         .child(editor)
                 } else {

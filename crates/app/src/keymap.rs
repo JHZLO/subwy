@@ -114,7 +114,14 @@ const MARKDOWN_EDITOR: &str = "Markdown > Input";
 
 actions!(
     markdown,
-    [Newline, IndentItem, OutdentItem, ToggleBold, ToggleItalic]
+    [
+        Newline,
+        IndentItem,
+        OutdentItem,
+        ToggleBold,
+        ToggleItalic,
+        ToggleTask
+    ]
 );
 
 /// Binds the user's extra keys from the settings file. Returns the first one that could not be bound.
@@ -243,6 +250,8 @@ fn own_keys() -> Vec<Own> {
         own("backspace", DeleteIndent, Some(EDITOR_INPUT)),
         own("cmd-b", ToggleBold, Some(MARKDOWN_EDITOR)),
         own("cmd-i", ToggleItalic, Some(MARKDOWN_EDITOR)),
+        // Obsidian's task key; IntelliJ has none.
+        own("cmd-enter", ToggleTask, Some(MARKDOWN_EDITOR)),
         // IntelliJ's line keys, in any tab. gpui-kit gives Cmd+Backspace and Alt+Shift+Up/Down to
         // its editor too (delete to the line start, add a cursor); these tie with those on depth
         // and run first, and a line with nowhere to move propagates to them.

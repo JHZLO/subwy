@@ -413,6 +413,59 @@ fn has_scheme(target: &str) -> bool {
     })
 }
 
+/// Cmd+Enter: the lines under the selection tick or untick their task box. A list item without a
+/// box gets an empty one and a line of text becomes an open task; blank lines and quotes stay.
+/// A selection that ends at the start of a line leaves that line out. None when no line changes.
+pub fn toggle_task(text: &str, selection: Range<usize>) -> Option<Edit> {
+    let start = text[..selection.start].rfind('\n').map_or(0, |i| i + 1);
+    let last = match text[..selection.end].ends_with('\n') && selection.end > selection.start {
+        true => selection.end - 1,
+        false => selection.end,
+    };
+    let end = text[last..].find('\n').map_or(text.len(), |i| last + i);
+    // Where text went in, in the old text, and how much: a caret at or after it moves along.
+    let mut added: Vec<(usize, usize)> = Vec::new();
+    let mut lines = Vec::new();
+    let mut line_start = start;
+    for line in text[start..end].split('\n') {
+        let indent = blank_prefix(line);
+        let new = match item(line) {
+            Some(item) if item.list && item.marker.len() > item.width => {
+                let mark = indent.len() + item.width + 1;
+                let ticked = if &line[mark..=mark] == " " { "x" } else { " " };
+                format!("{}{ticked}{}", &line[..mark], &line[mark + 1..])
+            }
+            Some(item) if item.list => {
+                let column = indent.len() + item.width;
+                added.push((line_start + column, 4));
+                format!("{}[ ] {}", &line[..column], &line[column..])
+            }
+            Some(_) => line.to_string(),
+            None if line.trim().is_empty() => line.to_string(),
+            None => {
+                added.push((line_start + indent.len(), 6));
+                format!("{indent}- [ ] {}", &line[indent.len()..])
+            }
+        };
+        lines.push(new);
+        line_start += line.len() + 1;
+    }
+    let moved = |offset: usize| -> usize {
+        offset
+            + added
+                .iter()
+                .filter(|(point, _)| *point <= offset)
+                .map(|(_, len)| len)
+                .sum::<usize>()
+    };
+    let new = lines.join("\n");
+    (new != text[start..end]).then(|| Edit {
+        range: start..end,
+        text: new,
+        selection: moved(selection.start)..moved(selection.end),
+    })
+}
+
 /// The folder, beside a Markdown file, that pictures pasted into it go to.
 pub const IMAGE_DIR: &str = "images";
 
@@ -835,6 +888,47 @@ mod tests {
         assert!(percent_encode(target).bytes().all(|b| b.is_ascii_graphic()));
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%zz%41"), "%zzA");
+    }
+
+    /// Cmd+Enter on `marked`, where `|` is the caret or `{` `}` the selection, marked the same way
+    /// after; None when nothing changes.
+    fn task(marked: &str) -> Option<String> {
+        let (text, selection) = match marked.find('|') {
+            Some(caret) => (marked.replacen('|', "", 1), caret..caret),
+            None => {
+                let start = marked.find('{').expect("selection");
+                let end = marked.find('}').expect("selection") - 1;
+                (marked.replacen(['{', '}'], "", 2), start..end)
+            }
+        };
+        let edit = toggle_task(&text, selection)?;
+        let mut out = text;
+        out.replace_range(edit.range, &edit.text);
+        let Range { start, end } = edit.selection;
+        if start == end {
+            out.insert(start, '|');
+        } else {
+            out.insert(end, '}');
+            out.insert(start, '{');
+        }
+        Some(out)
+    }
+
+    #[test]
+    fn cmd_enter_ticks_and_unticks_tasks() {
+        assert_eq!(task("- [ ] buy milk|").as_deref(), Some("- [x] buy milk|"));
+        assert_eq!(task("- [x] |done").as_deref(), Some("- [ ] |done"));
+        assert_eq!(task("  * [X] deep|").as_deref(), Some("  * [ ] deep|"));
+        assert_eq!(task("- item|").as_deref(), Some("- [ ] item|"));
+        assert_eq!(task("1. step|").as_deref(), Some("1. [ ] step|"));
+        assert_eq!(task("  plain|").as_deref(), Some("  - [ ] plain|"));
+        assert_eq!(task("|plain").as_deref(), Some("- [ ] |plain"));
+        assert_eq!(
+            task("{- [ ] a\nb\n}- [ ] c").as_deref(),
+            Some("{- [x] a\n- [ ] b\n}- [ ] c")
+        );
+        assert_eq!(task("> quoted|"), None);
+        assert_eq!(task("|"), None);
     }
 
     #[test]
