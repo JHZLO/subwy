@@ -117,6 +117,9 @@ impl DefinitionProvider for MarkdownLinks {
 /// Something the workspace shows (title, stem, status) may have changed.
 pub struct TabsChanged;
 
+/// A code block's copy button in the preview put this on the clipboard.
+pub struct CodeCopied(pub String);
+
 /// A file being read on the background executor for [`EditorTabs::open`].
 struct PendingOpen {
     id: u64,
@@ -161,6 +164,7 @@ pub struct EditorTabs {
 }
 
 impl EventEmitter<TabsChanged> for EditorTabs {}
+impl EventEmitter<CodeCopied> for EditorTabs {}
 
 impl Focusable for EditorTabs {
     /// The active tab's editor, unless only its preview shows: keys must not edit hidden text.
@@ -1460,6 +1464,7 @@ impl EditorTabs {
     /// A preview whose links follow from the tab it shows, as Cmd+click on them does in the editor.
     fn new_preview(cx: &mut Context<Self>) -> Entity<Preview> {
         let tabs = cx.entity().downgrade();
+        let copied = tabs.clone();
         cx.new(|cx| {
             Preview::new(
                 move |target, window, cx| {
@@ -1472,6 +1477,10 @@ impl EditorTabs {
                             }
                         });
                     });
+                },
+                move |code, _, cx| {
+                    let code = code.to_string();
+                    let _ = copied.update(cx, |_, cx| cx.emit(CodeCopied(code)));
                 },
                 cx,
             )

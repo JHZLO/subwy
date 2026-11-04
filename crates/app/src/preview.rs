@@ -9,16 +9,16 @@ use std::{
     time::Duration,
 };
 
-use gpui_kit::base::{TextView, TextViewStyle};
+use gpui_kit::base::{TextView, TextViewStyle, text::CodeBlock};
 use gpui_kit::component::{
-    ActiveTheme as _,
+    ActiveTheme as _, Icon,
     input::EditorState,
     text::{
         MarkdownExtensions, MarkdownNode, MarkdownParseContext, RenderedText, TextViewState,
         markdown_ast::Node,
     },
 };
-use gpui_kit::{TestSupportExt as _, prelude::FluentBuilder as _, *};
+use gpui_kit::{TestSupportExt as _, assets::IconName, prelude::FluentBuilder as _, *};
 
 use crate::theme::{self, Palette, c, z};
 
@@ -37,6 +37,8 @@ const LOCAL_IMAGE: &str = "subwy-local-image";
 
 /// What a click on a link in the preview does with the link's target.
 type OnLink = Arc<dyn Fn(&str, &mut Window, &mut App) + Send + Sync>;
+/// Told the code a code block's copy button put on the clipboard.
+type OnCopy = Arc<dyn Fn(&str, &mut Window, &mut App) + Send + Sync>;
 
 pub struct Preview {
     state: Entity<TextViewState>,
@@ -55,6 +57,8 @@ pub struct Preview {
     reveal: Rc<Cell<Option<Reveal>>>,
     /// A click on a link: its target, as written, for the tabs to follow from the shown file.
     on_link: OnLink,
+    /// A code block copied with its button, for the status bar to confirm.
+    on_copy: OnCopy,
     _state: Subscription,
 }
 
@@ -86,6 +90,7 @@ enum Target {
 impl Preview {
     pub fn new(
         on_link: impl Fn(&str, &mut Window, &mut App) + Send + Sync + 'static,
+        on_copy: impl Fn(&str, &mut Window, &mut App) + Send + Sync + 'static,
         cx: &mut Context<Self>,
     ) -> Self {
         let state = cx.new(|cx| TextViewState::markdown("", cx));
@@ -102,6 +107,7 @@ impl Preview {
             follow_pending: false,
             reveal: Rc::default(),
             on_link: Arc::new(on_link),
+            on_copy: Arc::new(on_copy),
             _state,
         }
     }
@@ -221,10 +227,12 @@ impl Preview {
         let scroll = self.scroll.clone();
         let reveal = self.reveal.clone();
         let on_link = self.on_link.clone();
+        let on_copy = self.on_copy.clone();
         let top = z(TOP, cx);
         TextView::new(&self.state)
             .style(preview_style(p, cx))
             .markdown_extensions(self.extensions.clone())
+            .code_block_actions(move |block, _, cx| code_block_corner(block, on_copy.clone(), cx))
             // Instead of the browser for every link, which leaves a link to a file going nowhere.
             .on_link_click(move |url, event, window, cx| {
                 if event.standard_click() {
@@ -247,6 +255,35 @@ impl Preview {
                 window.refresh();
             })
     }
+}
+
+/// A code block's top right corner: its language, quietly, as gpui-kit puts it there, and a button
+/// that copies the code; the status bar confirms it, as it does every copy.
+fn code_block_corner(block: &CodeBlock, on_copy: OnCopy, cx: &App) -> Div {
+    let p = theme::colors(cx);
+    let code = block.code();
+    div()
+        .flex()
+        .items_center()
+        .gap(z(6., cx))
+        .px(z(4., cx))
+        .text_size(z(11., cx))
+        .text_color(c(p.sub))
+        .children(block.lang().filter(|lang| !lang.is_empty()))
+        .child(
+            div()
+                .id("copy-code")
+                .p(z(2., cx))
+                .rounded(px(4.))
+                .cursor_pointer()
+                .hover(|style| style.text_color(c(p.ink)))
+                .child(Icon::new(IconName::Copy).size(z(13., cx)))
+                .on_click(move |_, window, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(code.to_string()));
+                    on_copy(&code, window, cx);
+                })
+                .test_support(),
+        )
 }
 
 /// Where the editor's line `line` (from 0) of the rendered text's source shows in the preview.

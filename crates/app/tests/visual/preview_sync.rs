@@ -9,6 +9,43 @@ use crate::check::Check;
 pub fn run(check: &mut Check) {
     follows_the_editor(check);
     shows_local_images(check);
+    copies_code_blocks(check);
+}
+
+/// A code block's copy button puts its code on the clipboard, and the status bar says so.
+fn copies_code_blocks(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(
+        dir.path().join("code.md"),
+        "# Code\n\n```rust\nfn main() {}\n```\n",
+    )
+    .expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter cmd-shift-v");
+    settle(check, window);
+    let button = check
+        .cx
+        .update_window(window, |_, window, _| {
+            window
+                .try_find("copy-code")
+                .map(|button| button.bounds().center())
+        })
+        .expect("window");
+    check.expect_eq(
+        "preview code: a code block has a copy button",
+        button.is_some(),
+        true,
+    );
+    if let Some(at) = button {
+        check.cx.simulate_click(window, at, Modifiers::default());
+        check.cx.run_until_parked();
+    }
+    check.expect_eq(
+        "preview code: the button copies the code",
+        check.clipboard().map(|text| text.trim_end().to_string()),
+        Some("fn main() {}".to_string()),
+    );
+    check.shot(window, "preview-code-copied");
 }
 
 /// Draws a few frames: the editor scrolls in one, the preview asks where the line is in the next,

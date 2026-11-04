@@ -14,7 +14,7 @@ use subwy_project::{
 };
 
 use crate::{
-    editor_tabs::{EditorTabs, TabsChanged},
+    editor_tabs::{CodeCopied, EditorTabs, TabsChanged},
     empty_state,
     finder::{self, Finder, FinderEvent},
     keymap::{
@@ -370,6 +370,9 @@ impl Workspace {
         let tabs = cx.new(|cx| EditorTabs::new(Folders::single(PathBuf::new()), cx));
         let subscriptions = vec![
             cx.subscribe(&tabs, |_, _, _: &TabsChanged, cx| cx.notify()),
+            cx.subscribe(&tabs, |this, _, CodeCopied(code), cx| {
+                this.show_copied(code.clone(), "Copied code", cx)
+            }),
             cx.on_app_quit(|this, cx| {
                 this.save_session(cx);
                 async {}
