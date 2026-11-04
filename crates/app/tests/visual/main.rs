@@ -18,6 +18,7 @@ mod saving;
 mod search;
 mod settings;
 mod start;
+mod tabs;
 mod terminal;
 mod tree;
 mod windows;
@@ -78,6 +79,7 @@ fn main() {
     outline::run(&mut check);
     start::run(&mut check);
     saving::run(&mut check);
+    tabs::run(&mut check);
 
     if check.failures.is_empty() {
         println!("visual checks passed; screenshots in target/visual/");

@@ -18,6 +18,7 @@ actions!(
         CopyFileName,
         Save,
         CloseTab,
+        ReopenClosedTab,
         PrevTab,
         NextTab,
         TogglePreview,
@@ -190,6 +191,8 @@ fn own_keys() -> Vec<Own> {
         own("cmd-alt-shift-c", CopyRelativePath, ws),
         own("cmd-s", Save, ws),
         own("cmd-w", CloseTab, ws),
+        // A browser's key: IntelliJ gives it to Go to Test, which an editor has no use for.
+        own("cmd-shift-t", ReopenClosedTab, ws),
         own("cmd-shift-[", PrevTab, ws),
         own("cmd-shift-]", NextTab, ws),
         own("cmd-shift-v", TogglePreview, ws),

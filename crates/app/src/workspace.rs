@@ -20,8 +20,9 @@ use crate::{
     keymap::{
         CloseSettings, CloseTab, Collapse, CopyFileName, CopyPath, CopyRelativePath, Expand,
         FocusEditor, FocusTree, GoToLine, NewTerminal, NewWindow, NextTab, Open, OpenFolder,
-        OpenSettings, PrevTab, Quit, RevealInFinder, Save, SelectNext, SelectPrev, ToggleFinder,
-        TogglePreview, ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
+        OpenSettings, PrevTab, Quit, ReopenClosedTab, RevealInFinder, Save, SelectNext, SelectPrev,
+        ToggleFinder, TogglePreview, ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut,
+        ZoomReset,
     },
     project_panel::{DraggedItems, FileEvent, PanelEvent, ProjectPanel, ResizeDrag},
     search_panel::{self, SearchEvent, SearchPanel},
@@ -1527,6 +1528,16 @@ impl Workspace {
             .update(cx, |tabs, cx| tabs.close_active(window, cx));
     }
 
+    fn reopen_closed_tab(
+        &mut self,
+        _: &ReopenClosedTab,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.tabs
+            .update(cx, |tabs, cx| tabs.reopen_closed(window, cx));
+    }
+
     fn zoom_by(&mut self, step: i32, cx: &mut Context<Self>) {
         let current = cx.try_global::<theme::Zoom>().map_or(100, |z| z.0);
         let index = ZOOM_STEPS.iter().position(|&s| s == current).unwrap_or(2) as i32;
@@ -1676,6 +1687,7 @@ impl Render for Workspace {
                 )
             })
             .on_action(cx.listener(Self::close_tab))
+            .on_action(cx.listener(Self::reopen_closed_tab))
             .on_action(cx.listener(|this, _: &Quit, window, cx| {
                 // Without unsaved changes the app-wide handler quits.
                 if !this.confirm_discard(AfterDiscard::Quit, window, cx) {

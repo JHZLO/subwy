@@ -101,6 +101,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Cmd+Alt+Shift+C` | Copy the relative path; in the editor with the line, `docs/a.md:12` or `:12-18` |
 | | `Cmd+Alt+R` | Reveal in Finder |
 | | `Cmd+S`, `Cmd+W` | Save, close the tab |
+| | `Cmd+Shift+T` | Open the tab closed last again, its caret where it was |
 | | `Cmd+Shift+[` / `]` | Previous / next tab |
 | | `Cmd+Shift+V` | Markdown preview beside the editor (in the editor alone, an outline at the right shows the headings as stations on a line; click one to go there) (the buttons at the tab bar's right also show the preview alone; drag the line between them) |
 | | `Cmd+=`, `Cmd+-`, `Cmd+0` | Zoom in, out, back to 100% |

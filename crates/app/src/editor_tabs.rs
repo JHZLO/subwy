@@ -134,6 +134,8 @@ pub struct EditorTabs {
     next_open: u64,
     /// While a session's tabs load, only this one takes the active place, so the order reads finish in does not matter.
     restoring_active: Option<PathBuf>,
+    /// Tabs closed by hand, the latest last, with their carets: what Cmd+Shift+T opens again.
+    closed: Vec<TabState>,
     /// The active tab's cursor lines as last reported, so caret blinks do not count as changes.
     last_lines: Option<(u32, u32)>,
     preview: Option<Entity<Preview>>,
@@ -289,6 +291,7 @@ impl EditorTabs {
             pending: Vec::new(),
             next_open: 0,
             restoring_active: None,
+            closed: Vec::new(),
             last_lines: None,
             preview: None,
             preview_only: false,
@@ -908,7 +911,7 @@ impl EditorTabs {
                 }
                 self.error = None;
                 if then_close {
-                    self.remove_tab(index, window, cx);
+                    self.close_now(index, window, cx);
                 }
             }
             Saved::ChangedOnDisk if ask => self.confirm_overwrite(id, then_close, window, cx),
@@ -1039,7 +1042,7 @@ impl EditorTabs {
         if tab.dirty {
             self.confirm_close(tab.editor.entity_id(), window, cx);
         } else {
-            self.remove_tab(index, window, cx);
+            self.close_now(index, window, cx);
         }
     }
 
@@ -1057,7 +1060,7 @@ impl EditorTabs {
             .collect();
         for id in doomed {
             if let Some(index) = self.index_of(id) {
-                self.remove_tab(index, window, cx);
+                self.close_now(index, window, cx);
             }
         }
         if let Some(index) = self.index_of(keep) {
@@ -1084,7 +1087,7 @@ impl EditorTabs {
             window.close_dialog(cx);
             let _ = this.update(cx, |tabs, cx| {
                 if let Some(index) = tabs.index_of(id) {
-                    tabs.remove_tab(index, window, cx);
+                    tabs.close_now(index, window, cx);
                 }
             });
         };
@@ -1116,6 +1119,27 @@ impl EditorTabs {
                         ),
                 )
         });
+    }
+
+    /// Removes a tab the user closed, remembering it and its caret for Cmd+Shift+T. Tabs that go
+    /// because their file did (the Trash, a folder taken out) are not remembered.
+    fn close_now(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.tabs.get(index) {
+            let cursor = tab.editor.read(cx).cursor_position();
+            self.closed.push(TabState {
+                path: tab.path.clone(),
+                line: cursor.line,
+                column: cursor.character,
+            });
+        }
+        self.remove_tab(index, window, cx);
+    }
+
+    /// Cmd+Shift+T: the tab closed last opens again, its caret where it was.
+    pub fn reopen_closed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.closed.pop() {
+            self.restore(std::slice::from_ref(&tab), Some(0), window, cx);
+        }
     }
 
     fn remove_tab(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
