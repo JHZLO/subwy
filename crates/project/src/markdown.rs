@@ -627,6 +627,18 @@ pub fn toggle_task(text: &str, selection: Range<usize>) -> Option<Edit> {
     })
 }
 
+/// A file the preview shows as a picture, by its extension.
+pub fn is_picture(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            [
+                "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tif", "tiff",
+            ]
+            .contains(&ext.to_ascii_lowercase().as_str())
+        })
+}
+
 /// The folder, beside a Markdown file, that pictures pasted into it go to.
 pub const IMAGE_DIR: &str = "images";
 
@@ -1162,6 +1174,14 @@ mod tests {
         );
         assert_eq!(task("> quoted|"), None);
         assert_eq!(task("|"), None);
+    }
+
+    #[test]
+    fn pictures_are_known_by_extension() {
+        assert!(is_picture(Path::new("a/shot.PNG")));
+        assert!(is_picture(Path::new("photo.jpeg")));
+        assert!(!is_picture(Path::new("notes.md")));
+        assert!(!is_picture(Path::new("png")));
     }
 
     #[test]

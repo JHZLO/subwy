@@ -360,6 +360,34 @@ pub fn write_new(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<
     }
 }
 
+/// Where a picture dropped on a Markdown file in the folder `dir` is linked from, relative to
+/// `dir` with `/` between folders: its own place when it is already under `dir`, else a copy in
+/// the images folder there, under a name nothing has (Finder's ` copy`).
+pub fn place_picture(dir: &Path, picture: &Path) -> Result<String, NameError> {
+    let slashed = |path: &Path| {
+        path.components()
+            .map(|part| part.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    };
+    if let Ok(inside) = picture.strip_prefix(dir) {
+        return Ok(slashed(inside));
+    }
+    let images = dir.join(crate::markdown::IMAGE_DIR);
+    std::fs::create_dir_all(&images)?;
+    let name = picture
+        .file_name()
+        .ok_or(NameError::Invalid)?
+        .to_string_lossy()
+        .into_owned();
+    let copy = copy_into(
+        picture,
+        &images,
+        &free_name(&images, &name, EntryKind::File),
+    )?;
+    Ok(slashed(copy.strip_prefix(dir).unwrap_or(&copy)))
+}
+
 /// The path a file should be written to: a symlink's target, so saving never replaces the link.
 pub fn write_target(path: &Path) -> PathBuf {
     if let Ok(target) = std::fs::canonicalize(path) {
@@ -1219,6 +1247,32 @@ mod tests {
         assert_eq!(free_name(dir, ".env", EntryKind::File), ".env copy");
         std::fs::create_dir(dir.join("v1.2")).unwrap();
         assert_eq!(free_name(dir, "v1.2", EntryKind::Dir), "v1.2 copy");
+    }
+
+    #[test]
+    fn a_dropped_picture_is_linked_where_it_is_or_copied_in() {
+        let root = tempfile::tempdir().unwrap();
+        let notes = root.path().join("notes");
+        write(&notes.join("shots/a.png"), "a");
+        write(&root.path().join("out/my pic.png"), "b");
+        assert_eq!(
+            place_picture(&notes, &notes.join("shots/a.png")).unwrap(),
+            "shots/a.png"
+        );
+        let outside = root.path().join("out/my pic.png");
+        assert_eq!(
+            place_picture(&notes, &outside).unwrap(),
+            "images/my pic.png"
+        );
+        assert_eq!(
+            place_picture(&notes, &outside).unwrap(),
+            "images/my pic copy.png"
+        );
+        assert_eq!(
+            std::fs::read_to_string(notes.join("images/my pic.png")).unwrap(),
+            "b"
+        );
+        assert!(outside.is_file());
     }
 
     #[test]

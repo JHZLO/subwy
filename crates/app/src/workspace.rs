@@ -697,6 +697,44 @@ impl Workspace {
         }
     }
 
+    /// A drag from Finder brings no mouse move of its own, so after typing GPUI still counts the
+    /// keyboard as the last input and takes the pointer to be over nothing: no drop target would
+    /// see the drop. One mouse move where the drag is puts the pointer back.
+    fn finder_drag_move(
+        &mut self,
+        event: &DragMoveEvent<ExternalPaths>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !window.last_input_was_keyboard() {
+            return;
+        }
+        let position = event.event.position;
+        window.defer(cx, move |window, cx| {
+            let _ = window.dispatch_event(
+                PlatformInput::MouseMove(MouseMoveEvent {
+                    position,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::default(),
+                }),
+                cx,
+            );
+        });
+    }
+
+    /// Files from Finder dropped on the editor: pictures on a Markdown tab are linked there, and
+    /// anything else opens.
+    fn drop_from_finder(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
+        let linked = self
+            .tabs
+            .update(cx, |tabs, cx| tabs.drop_pictures(paths, window, cx));
+        if !linked {
+            self.drop_on_editor(paths, window, cx);
+        } else if self.panel.is_some() {
+            self.focus_editor_area(window, cx);
+        }
+    }
+
     /// Items dropped on the terminal: their paths are typed at the prompt, as Terminal.app does.
     fn drop_on_terminal(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
         let Some(terminal) = &self.terminal else {
@@ -1663,6 +1701,7 @@ impl Render for Workspace {
                 "Workspace empty"
             })
             .track_focus(&self.focus_handle)
+            .on_drag_move(cx.listener(Self::finder_drag_move))
             .on_action(cx.listener(Self::open_folder))
             .on_action(cx.listener(|_, _: &NewWindow, _, cx| {
                 cx.defer(|cx| {
@@ -1768,7 +1807,7 @@ impl Render for Workspace {
                                     ))
                                     .on_drop(cx.listener(
                                         |this, paths: &ExternalPaths, window, cx| {
-                                            this.drop_on_editor(paths.paths(), window, cx)
+                                            this.drop_from_finder(paths.paths(), window, cx)
                                         },
                                     ))
                                     .map(|el| match self.panel {

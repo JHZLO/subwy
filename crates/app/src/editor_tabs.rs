@@ -1740,6 +1740,55 @@ impl EditorTabs {
         .detach();
     }
 
+    /// Pictures from Finder dropped on a Markdown tab: each linked at the caret, one per line,
+    /// copied first into the images folder beside the file unless already under its folder. False
+    /// when the drop is not all pictures or the tab takes no typing, so the files open instead.
+    pub fn drop_pictures(
+        &mut self,
+        paths: &[PathBuf],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(tab) = self
+            .active_tab()
+            .filter(|t| t.is_markdown() && !t.read_only)
+        else {
+            return false;
+        };
+        if paths.is_empty() || !paths.iter().all(|path| markdown::is_picture(path)) {
+            return false;
+        }
+        let editor = tab.editor.clone();
+        let file = self.abs(&tab.path);
+        let dir = file.parent().unwrap_or(Path::new("")).to_path_buf();
+        let shown = tab.path.clone();
+        let paths = paths.to_vec();
+        let place = cx.background_executor().spawn(async move {
+            paths
+                .iter()
+                .map(|path| fs::place_picture(&dir, path))
+                .collect::<Result<Vec<_>, _>>()
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let placed = place.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                match placed {
+                    Ok(paths) => {
+                        let links: Vec<String> = paths
+                            .iter()
+                            .map(|path| markdown::image_link(path.as_str()))
+                            .collect();
+                        editor.update(cx, |state, cx| state.replace(links.join("\n"), window, cx));
+                    }
+                    Err(err) => this.error = Some(format!("{}: {err}", shown.display())),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        true
+    }
+
     /// Cmd+D: the selection, or the caret's line, again right after it.
     fn duplicate_line(&mut self, _: &DuplicateLine, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_text(false, window, cx, |text, selection| {

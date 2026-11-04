@@ -163,6 +163,52 @@ pub fn run(check: &mut Check) {
     ticks_tasks(check);
     counts_words(check);
     lines_up_tables(check);
+    drops_pictures(check);
+}
+
+/// A picture from Finder dropped on a Markdown tab is copied into images/ beside it and linked,
+/// right after typing too (keys before the drop, as here).
+fn drops_pictures(check: &mut Check) {
+    use gpui_kit::{ExternalPaths, FileDropEvent, point, px};
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("note.md"), "").expect("write");
+    let elsewhere = tempfile::tempdir().expect("temp dir");
+    let picture = elsewhere.path().join("shot.png");
+    fs::write(&picture, b"not really a png").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter");
+
+    let (width, _) = check.window_size(window);
+    let position = point(px(width * 0.6), px(200.));
+    let paths = ExternalPaths(vec![picture].into());
+    check
+        .cx
+        .simulate_event(window, FileDropEvent::Entered { position, paths });
+    check
+        .cx
+        .simulate_event(window, FileDropEvent::Pending { position });
+    check
+        .cx
+        .simulate_event(window, FileDropEvent::Submit { position });
+    let linked = "![](images/shot.png)";
+    check.wait_until(|check| {
+        check
+            .workspace(window, |w, cx| w.active_text(cx))
+            .as_deref()
+            == Some(linked)
+    });
+    let text = check.workspace(window, |w, cx| w.active_text(cx));
+    check.shot(window, "markdown-drop-picture");
+    check.expect_eq(
+        "markdown: a picture dropped from Finder is linked",
+        text.as_deref(),
+        Some(linked),
+    );
+    check.expect_eq(
+        "markdown: and copied into images/ beside the file",
+        dir.path().join("images/shot.png").is_file(),
+        true,
+    );
 }
 
 /// Tab in a table lines it up and selects the next cell, so typing fills it.
