@@ -63,6 +63,8 @@ pub struct SearchPanel {
     folders: Folders,
     /// The folder searched, as the tree names it, ending in `/`; the whole window when `None`.
     scope: Option<String>,
+    /// Alt+F7: with no query, the list is the lines that link to this file.
+    links_to: Option<PathBuf>,
     input: Entity<InputState>,
     /// Empty until the walk of the folder, started when the panel opens, comes back.
     index: Option<Arc<FileIndex>>,
@@ -95,17 +97,23 @@ impl Drop for SearchPanel {
 
 impl SearchPanel {
     /// Searches the window's folders, or only the folder `scope` (Cmd+Shift+F on a folder in the
-    /// tree, IntelliJ's Directory scope).
+    /// tree, IntelliJ's Directory scope). With `links_to` (Alt+F7) it first lists the lines that
+    /// link to that file; typing searches as usual.
     pub fn new(
         folders: Folders,
         scope: Option<PathBuf>,
+        links_to: Option<PathBuf>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let scope = scope.map(|dir| format!("{}/", paths::relative(&dir)));
-        let placeholder = match &scope {
-            Some(dir) => format!("Find in {}", dir.trim_end_matches('/')),
-            None => "Find in folder".to_string(),
+        let placeholder = match (&links_to, &scope) {
+            (Some(file), _) => format!(
+                "Files linking to {}",
+                file.file_name().unwrap_or_default().to_string_lossy()
+            ),
+            (None, Some(dir)) => format!("Find in {}", dir.trim_end_matches('/')),
+            (None, None) => "Find in folder".to_string(),
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         let subscriptions = vec![cx.subscribe_in(
@@ -139,6 +147,7 @@ impl SearchPanel {
         Self {
             folders,
             scope,
+            links_to,
             input,
             index: None,
             results: None,
@@ -158,7 +167,20 @@ impl SearchPanel {
         let query = self.input.read(cx).value().to_string();
         if query.is_empty() {
             self.search = Task::ready(());
-            self.show(None, cx);
+            match (self.links_to.clone(), self.index.clone()) {
+                (Some(target), Some(index)) => {
+                    let folders = self.folders.clone();
+                    self.search = cx.spawn(async move |this, cx| {
+                        let found = cx
+                            .background_spawn(async move {
+                                search::backlinks(&folders, &index.paths, &target)
+                            })
+                            .await;
+                        let _ = this.update(cx, |this, cx| this.show(Some(found), cx));
+                    });
+                }
+                _ => self.show(None, cx),
+            }
             return;
         }
         // The index arriving schedules the search again.
@@ -234,7 +256,7 @@ impl SearchPanel {
     }
 
     /// "12 matches in 4 files"; `None` before the first search for a query.
-    fn summary(&self) -> Option<String> {
+    pub fn summary(&self) -> Option<String> {
         let results = self.results.as_ref()?;
         let files = results.files.len();
         Some(if results.matches == 0 {

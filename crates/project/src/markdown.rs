@@ -337,20 +337,48 @@ pub enum Link {
 /// The inline link (`[text](target)`, or an image) at `column` of `line`: where it is in the line,
 /// and its target as written, without angle brackets or a title.
 pub fn link_at(line: &str, column: usize) -> Option<(Range<usize>, String)> {
+    links(line)
+        .into_iter()
+        .find(|(range, _)| range.contains(&column))
+}
+
+/// Every inline link (and image) of `line`, as [`link_at`] finds one.
+pub fn links(line: &str) -> Vec<(Range<usize>, String)> {
+    let mut found = Vec::new();
     let mut from = 0;
-    while let Some(found) = line[from..].find("](") {
-        let middle = from + found;
+    while let Some(at) = line[from..].find("](") {
+        let middle = from + at;
         from = middle + 2;
-        let (Some(start), Some((target, end))) =
+        if let (Some(start), Some((target, end))) =
             (line[..middle].rfind('['), link_target(line, middle + 2))
-        else {
-            continue;
-        };
-        if (start..end).contains(&column) {
-            return Some((start..end, target));
+        {
+            found.push((start..end, target));
         }
     }
-    None
+    found
+}
+
+/// Whether the file at `path`, holding `text`, is Markdown: by its extension, and a file without
+/// one is a note unless it is a dotfile, a build file or a script (`#!` on its first line).
+pub fn is_markdown(path: &Path, text: &str) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "md" | "markdown" | "mdx" => true,
+        "" => {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            !name.starts_with('.')
+                && !matches!(name.as_str(), "makefile" | "justfile" | "dockerfile")
+                && !text.starts_with("#!")
+        }
+        _ => false,
+    }
 }
 
 /// The target of a link whose `(` ends at `open`, and where the link ends, after its `)`.

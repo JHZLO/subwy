@@ -44,7 +44,30 @@ fn expect_reference(check: &mut Check, window: AnyWindowHandle, what: &str, want
     check.keys(window, "cmd-1");
 }
 
+/// Alt+F7 lists the lines that link to the active file; Enter opens one at its line.
+fn backlinks(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(dir.path().join("a.md"), "intro\nsee [b](b.md)\n").expect("write");
+    std::fs::write(dir.path().join("b.md"), "# B\n").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down down enter alt-f7");
+    check.wait_until(|check| {
+        check
+            .workspace(window, |w, cx| w.search_summary(cx))
+            .is_some()
+    });
+    let summary = check.workspace(window, |w, cx| w.search_summary(cx));
+    check.expect_eq(
+        "alt-f7 finds the link to the file",
+        summary.as_deref(),
+        Some("1 match in 1 file"),
+    );
+    check.keys(window, "enter");
+    expect_reference(check, window, "enter opens the linking line", "a.md:2");
+}
+
 pub fn run(check: &mut Check) {
+    backlinks(check);
     let fixture = fixture();
     let window = check.open(Some(fixture.path()));
 

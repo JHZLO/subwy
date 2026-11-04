@@ -17,7 +17,7 @@ use std::{
 
 use unicode_normalization::UnicodeNormalization;
 
-use crate::{folders::Folders, fs};
+use crate::{folders::Folders, fs, markdown};
 
 /// More matches than this stop the search: a list that long is for narrowing the query, not
 /// for reading, and stopping keeps a one-letter query quick on a large folder.
@@ -77,6 +77,48 @@ pub fn search_folders(
 ) -> Option<Results> {
     let resolve = |path: &str| folders.absolute(Path::new(path)).unwrap_or_default();
     search_inner(&resolve, paths, query, cancel, MAX_MATCHES)
+}
+
+/// Alt+F7 on a file: the lines of the Markdown files among `paths` (as the finder's index lists
+/// them) that link to `target`, each link resolved from its own file's folder as following it
+/// would be. The links are the matches.
+pub fn backlinks(folders: &Folders, paths: &[String], target: &Path) -> Results {
+    let target = markdown::Link::File(target.to_path_buf());
+    let mut results = Results::default();
+    for path in paths {
+        let Some(abs) = folders.absolute(Path::new(path)) else {
+            continue;
+        };
+        let Ok(file) = fs::read_text(&abs) else {
+            continue;
+        };
+        if !file.text.contains("](") || !markdown::is_markdown(&abs, &file.text) {
+            continue;
+        }
+        let dir = abs.parent().unwrap_or(Path::new(""));
+        let mut lines = Vec::new();
+        let mut start = 0;
+        for (number, line) in file.text.split('\n').enumerate() {
+            let ranges: Vec<Range<usize>> = markdown::links(line)
+                .into_iter()
+                .filter(|(_, to)| markdown::follow(dir, to).as_ref() == Some(&target))
+                .map(|(range, _)| start + range.start..start + range.end)
+                .collect();
+            if !ranges.is_empty() {
+                results.matches += ranges.len();
+                let bounds = start..start + line.len();
+                lines.push(line_match(&file.text, number as u32, bounds, &ranges));
+            }
+            start += line.len() + 1;
+        }
+        if !lines.is_empty() {
+            results.files.push(FileMatches {
+                path: path.clone(),
+                lines,
+            });
+        }
+    }
+    results
 }
 
 fn search_with_limit(
@@ -356,6 +398,30 @@ mod tests {
         let path = root.join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn backlinks_are_the_markdown_links_to_the_file() {
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        write(root, "docs/b.md", b"# B\n");
+        write(
+            root,
+            "notes/a.md",
+            b"intro\nsee [b](../docs/b.md) and [web](https://x.kr)\n",
+        );
+        write(root, "notes/c.md", b"[other](other.md)\n");
+        write(root, "notes/d.txt", b"[b](../docs/b.md)\n");
+        let paths: Vec<String> = ["docs/b.md", "notes/a.md", "notes/c.md", "notes/d.txt"]
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        let folders = Folders::single(root.to_path_buf());
+        let found = backlinks(&folders, &paths, &root.join("docs/b.md"));
+        assert_eq!(
+            hits(&found),
+            [("notes/a.md".to_string(), 1, "[b](../docs/b.md)".to_string())]
+        );
     }
 
     fn run(root: &Path, paths: &[&str], query: &str) -> Results {

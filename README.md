@@ -97,6 +97,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Cmd+1` | Focus the tree (again: hide it) |
 | | `Cmd+Shift+O` | Find a file by name |
 | | `Cmd+Shift+F` | Find text in the folder; from the tree with a folder selected, in that folder only |
+| | `Alt+F7` | The Markdown lines that link to the file in front (`Enter` opens one); typing searches as usual |
 | | `Cmd+Shift+C` | Copy the absolute path |
 | | `Cmd+Alt+Shift+C` | Copy the relative path; in the editor with the line, `docs/a.md:12` or `:12-18` |
 | | `Cmd+Alt+R` | Reveal in Finder |

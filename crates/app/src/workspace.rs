@@ -19,10 +19,10 @@ use crate::{
     finder::{self, Finder, FinderEvent},
     keymap::{
         CloseSettings, CloseTab, Collapse, CopyFileName, CopyPath, CopyRelativePath, Expand,
-        FocusEditor, FocusTree, GoToLine, NewTerminal, NewWindow, NextTab, Open, OpenFolder,
-        OpenSettings, PrevTab, Quit, ReopenClosedTab, RevealInFinder, Save, SelectNext, SelectPrev,
-        ToggleFinder, TogglePreview, ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut,
-        ZoomReset,
+        FindBacklinks, FocusEditor, FocusTree, GoToLine, NewTerminal, NewWindow, NextTab, Open,
+        OpenFolder, OpenSettings, PrevTab, Quit, ReopenClosedTab, RevealInFinder, Save, SelectNext,
+        SelectPrev, ToggleFinder, TogglePreview, ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn,
+        ZoomOut, ZoomReset,
     },
     project_panel::{DraggedItems, FileEvent, PanelEvent, ProjectPanel, ResizeDrag},
     search_panel::{self, SearchEvent, SearchPanel},
@@ -1065,6 +1065,14 @@ impl Workspace {
         self.tabs.read(cx).error.clone()
     }
 
+    /// The open folder search's count line ("1 match in 1 file"); for the UI checks.
+    pub fn search_summary(&self, cx: &App) -> Option<String> {
+        match &self.overlay.as_ref()?.view {
+            OverlayView::Search(view) => view.read(cx).summary(),
+            OverlayView::Finder(_) => None,
+        }
+    }
+
     /// Whether the Settings dialog is open; for the UI checks.
     pub fn settings_open(&self) -> bool {
         self.settings.is_some()
@@ -1365,7 +1373,30 @@ impl Workspace {
             .tree_focused(window, cx)
             .then(|| self.panel.as_ref()?.read(cx).selected_folder())
             .flatten();
-        let view = cx.new(|cx| SearchPanel::new(folders, scope, window, cx));
+        self.open_search(folders, scope, None, window, cx);
+    }
+
+    /// Alt+F7 (IntelliJ's Find Usages, on a file): the Markdown lines that link to the active
+    /// file, in the folder search's list.
+    fn find_backlinks(&mut self, _: &FindBacklinks, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(folders), Some(file)) = (self.folders(cx), self.active_file(cx)) else {
+            return;
+        };
+        let Some(target) = folders.absolute(&file) else {
+            return;
+        };
+        self.open_search(folders, None, Some(target), window, cx);
+    }
+
+    fn open_search(
+        &mut self,
+        folders: Folders,
+        scope: Option<PathBuf>,
+        links_to: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let view = cx.new(|cx| SearchPanel::new(folders, scope, links_to, window, cx));
         let subscription = cx.subscribe_in(
             &view,
             window,
@@ -1739,6 +1770,7 @@ impl Render for Workspace {
             })
             .on_action(cx.listener(Self::close_tab))
             .on_action(cx.listener(Self::reopen_closed_tab))
+            .on_action(cx.listener(Self::find_backlinks))
             .on_action(cx.listener(|this, _: &Quit, window, cx| {
                 // Without unsaved changes the app-wide handler quits.
                 if !this.confirm_discard(AfterDiscard::Quit, window, cx) {

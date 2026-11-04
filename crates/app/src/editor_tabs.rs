@@ -234,26 +234,19 @@ fn tab_language(path: &Path, text: &str, len: u64) -> SharedString {
 /// The language for `path`, by its extension. A file without one is a note, so Markdown, unless
 /// it is a dotfile, a build file or a script (`#!` on its first line).
 fn language_for(path: &Path, text: &str) -> SharedString {
+    if markdown::is_markdown(path, text) {
+        return "markdown".into();
+    }
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_lowercase();
     match ext.as_str() {
-        "md" | "markdown" | "mdx" => "markdown".into(),
         "yml" => "yaml".into(),
         "ts" | "mts" | "cts" => "typescript".into(),
         "js" | "mjs" | "cjs" => "javascript".into(),
-        "" => {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-            let note = !name.starts_with('.')
-                && !matches!(name.as_str(), "makefile" | "justfile" | "dockerfile")
-                && !text.starts_with("#!");
-            SharedString::from(if note { "markdown" } else { "text" })
-        }
+        "" => "text".into(),
         other => other.to_string().into(),
     }
 }
