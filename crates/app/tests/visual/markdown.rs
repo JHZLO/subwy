@@ -159,6 +159,36 @@ pub fn run(check: &mut Check) {
     edges(check);
     backspace_indent(check);
     pastes_pictures(check);
+    pastes_links(check);
+}
+
+/// A web address pasted over selected text makes the text its link; with nothing selected it
+/// pastes as it is.
+fn pastes_links(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("note.md"), "").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter");
+
+    type_text(check, window, "see docs");
+    check.cx.write_to_clipboard(ClipboardItem::new_string(
+        "https://example.com/docs".to_string(),
+    ));
+    expect_text(
+        check,
+        window,
+        "alt-shift-left cmd-v",
+        "markdown: a web address over a selection makes it a link",
+        "see [docs](https://example.com/docs)",
+    );
+    type_text(check, window, " ");
+    expect_text(
+        check,
+        window,
+        "cmd-v",
+        "markdown: with nothing selected the address pastes as it is",
+        "see [docs](https://example.com/docs) https://example.com/docs",
+    );
 }
 
 /// A picture on the clipboard (a screenshot) pastes into Markdown as a file in images/ beside it

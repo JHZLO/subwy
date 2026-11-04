@@ -1615,19 +1615,36 @@ impl EditorTabs {
         });
     }
 
-    /// Cmd+V in a Markdown tab with a picture on the clipboard and no text (a screenshot): the
-    /// picture goes into the images folder beside the file, written off the main thread, and a
-    /// link to it in place of the selection. Any other paste is gpui-kit's, which skips pictures.
-    fn paste_image(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+    /// Cmd+V in a Markdown tab. A web address over selected text makes the text its link. A
+    /// picture with no text (a screenshot) goes into the images folder beside the file, written
+    /// off the main thread, and a link to it in place of the selection. Any other paste is
+    /// gpui-kit's, which skips pictures.
+    fn paste_markdown(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         let (Some(editor), Some(tab)) = (self.typing_editor(true, window, cx), self.active_tab())
         else {
             return;
         };
-        let Some(image) = cx.read_from_clipboard().and_then(|item| {
-            item.into_entries().find_map(|entry| match entry {
-                ClipboardEntry::Image(image) => Some(image),
-                _ => None,
-            })
+        let Some(item) = cx.read_from_clipboard() else {
+            return;
+        };
+        if let Some(clipboard) = item.text() {
+            let state = editor.read(cx);
+            let selection = state.selected_range();
+            // Ctrl+G's selections each take the paste, as gpui-kit spreads it.
+            let several = self
+                .occurrences
+                .as_ref()
+                .is_some_and(|run| run.editor == editor.entity_id() && run.first == selection);
+            let selected = state.text().slice(selection).to_string();
+            if let Some(link) = markdown::link_paste(&selected, &clipboard).filter(|_| !several) {
+                cx.stop_propagation();
+                editor.update(cx, |state, cx| state.replace(link, window, cx));
+            }
+            return;
+        }
+        let Some(image) = item.into_entries().find_map(|entry| match entry {
+            ClipboardEntry::Image(image) => Some(image),
+            _ => None,
         }) else {
             return;
         };
@@ -2040,7 +2057,7 @@ impl Render for EditorTabs {
             .capture_action(
                 cx.listener(|this, _: &MoveUp, window, cx| this.past_edge(false, window, cx)),
             )
-            .capture_action(cx.listener(Self::paste_image))
+            .capture_action(cx.listener(Self::paste_markdown))
             .on_action(cx.listener(Self::delete_indent))
             .on_action(cx.listener(Self::duplicate_line))
             .on_action(cx.listener(Self::delete_line))

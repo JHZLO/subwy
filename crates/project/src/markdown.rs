@@ -434,6 +434,43 @@ pub fn image_link(path: &str) -> String {
     out
 }
 
+/// What pasting `clipboard` over the selected `text` writes: a web address over a selection makes
+/// the selection its link, `[text](url)`. None for anything else (no selection, one over several
+/// lines, a clipboard that is not one address), which pastes as it is.
+pub fn link_paste(text: &str, clipboard: &str) -> Option<String> {
+    let url = clipboard.trim();
+    let is_url = ["http://", "https://", "mailto:"].iter().any(|scheme| {
+        url.len() > scheme.len()
+            && url
+                .get(..scheme.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(scheme))
+    }) && !url.contains(|ch: char| ch.is_whitespace() || ch == '<' || ch == '>');
+    if !is_url || text.is_empty() || text.contains('\n') || !balanced(text, '[', ']') {
+        return None;
+    }
+    // A destination with a bracket left open is read only inside `<>`.
+    Some(match balanced(url, '(', ')') {
+        true => format!("[{text}]({url})"),
+        false => format!("[{text}](<{url}>)"),
+    })
+}
+
+/// Every `open` in `text` is closed by a later `close`, and no `close` comes first.
+fn balanced(text: &str, open: char, close: char) -> bool {
+    let mut depth = 0usize;
+    for ch in text.chars() {
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            let Some(less) = depth.checked_sub(1) else {
+                return false;
+            };
+            depth = less;
+        }
+    }
+    depth == 0
+}
+
 /// `text` with every byte but letters, digits and `-._~` written as `%XX`, so it fits in a URI.
 pub fn percent_encode(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -810,5 +847,37 @@ mod tests {
             "![](images/\u{d55c}\u{ae00}%20%28draft%29%20%231%3F%25.png)"
         );
         assert_eq!(percent_decode(&link[4..link.len() - 1]), path);
+    }
+
+    #[test]
+    fn a_web_address_over_a_selection_makes_a_link() {
+        let link = link_paste;
+        assert_eq!(
+            link("docs", "https://example.com/docs").as_deref(),
+            Some("[docs](https://example.com/docs)")
+        );
+        assert_eq!(
+            link("\u{d55c}\u{ae00}", " HTTP://x.kr \n").as_deref(),
+            Some("[\u{d55c}\u{ae00}](HTTP://x.kr)")
+        );
+        assert_eq!(
+            link("me", "mailto:me@example.com").as_deref(),
+            Some("[me](mailto:me@example.com)")
+        );
+        assert_eq!(
+            link("a[0]", "https://en.wikipedia.org/wiki/Rust_(language)").as_deref(),
+            Some("[a[0]](https://en.wikipedia.org/wiki/Rust_(language))")
+        );
+        assert_eq!(
+            link("smile", "https://x.kr/:)").as_deref(),
+            Some("[smile](<https://x.kr/:)>)")
+        );
+        // These paste as they are.
+        assert_eq!(link("", "https://example.com"), None);
+        assert_eq!(link("two\nlines", "https://example.com"), None);
+        assert_eq!(link("a]", "https://example.com"), None);
+        assert_eq!(link("docs", "TODO:fix"), None);
+        assert_eq!(link("docs", "https://a.com https://b.com"), None);
+        assert_eq!(link("docs", "https://"), None);
     }
 }

@@ -134,6 +134,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Cmd+B`, `Cmd+I` | Bold, italic |
 | | `Cmd`-click a link | Follow it: a file opens in a tab (a click in the preview does the same), a web page in the browser |
 | | `Cmd+V` with a picture copied | Save it in `images/` beside the file, as `notes-1.png` for `notes.md` (the next free number), and put in its link |
+| | `Cmd+V` with a web address copied, over selected text | Make the text a link to it, `[text](https://...)` |
 
 ## Settings
 
