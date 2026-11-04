@@ -239,6 +239,89 @@ pub fn next_occurrence(text: &str, from: Range<usize>, whole_word: bool) -> Opti
         .map(|start| start..start + needle.len())
 }
 
+/// Cmd+Shift+U (IntelliJ's Toggle Case): the selection, or the word at the caret, in capitals,
+/// or in small letters when it has none to raise. What changed stays selected.
+pub fn toggle_case(text: &str, selection: Range<usize>) -> Option<Edit> {
+    let range = match selection.is_empty() {
+        true => word_at(text, selection.start)?,
+        false => selection,
+    };
+    let old = &text[range.clone()];
+    let new = match old.chars().any(char::is_lowercase) {
+        true => old.to_uppercase(),
+        false => old.to_lowercase(),
+    };
+    (new != old).then(|| Edit {
+        selection: range.start..range.start + new.len(),
+        range,
+        text: new,
+    })
+}
+
+/// The letters, digits and `_` around `offset`, if there are any.
+fn word_at(text: &str, offset: usize) -> Option<Range<usize>> {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let start = text[..offset]
+        .char_indices()
+        .rev()
+        .take_while(|&(_, c)| word(c))
+        .last()
+        .map_or(offset, |(i, _)| i);
+    let end = text[offset..]
+        .char_indices()
+        .find(|&(_, c)| !word(c))
+        .map_or(text.len(), |(i, _)| offset + i);
+    (start < end).then_some(start..end)
+}
+
+/// Ctrl+Shift+J (IntelliJ's Join Lines): the next line comes up onto the caret's, its indent
+/// dropped and one space between; a selection over several lines joins them all. The caret goes
+/// to the start of the last line joined. None on the last line.
+pub fn join_lines(text: &str, selection: Range<usize>) -> Option<Edit> {
+    let mut lines = lines(text, &selection);
+    if text[lines.clone()].find('\n').is_none() {
+        if lines.end == text.len() {
+            return None;
+        }
+        lines.end = line_end(text, lines.end + 1);
+    }
+    let mut parts = text[lines.clone()].split('\n');
+    let mut joined = parts.next().unwrap_or_default().to_string();
+    let mut caret = joined.len();
+    for next in parts {
+        joined.truncate(joined.trim_end().len());
+        let next = next.trim_start();
+        if !joined.is_empty() && !next.is_empty() {
+            joined.push(' ');
+        }
+        caret = joined.len();
+        joined.push_str(next);
+    }
+    let caret = lines.start + caret;
+    Some(Edit {
+        range: lines,
+        text: joined,
+        selection: caret..caret,
+    })
+}
+
+/// F9 (Sublime Text's key; IntelliJ's Sort Lines has none): the lines under the selection in
+/// order, letter case aside, and selected. None for one line or lines already in order.
+pub fn sort_lines(text: &str, selection: Range<usize>) -> Option<Edit> {
+    let lines = lines(text, &selection);
+    let mut sorted: Vec<&str> = text[lines.clone()].split('\n').collect();
+    if sorted.len() < 2 {
+        return None;
+    }
+    sorted.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b)));
+    let sorted = sorted.join("\n");
+    (sorted != text[lines.clone()]).then(|| Edit {
+        selection: lines.clone(),
+        range: lines,
+        text: sorted,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +461,53 @@ mod tests {
         assert_eq!(moved("a\nb|\n", false), None);
         assert_eq!(moved("a\nb\n|", true), None);
         assert_eq!(moved("a|\nb\n", false).as_deref(), Some("b\na|\n"));
+    }
+
+    fn cased(marked: &str) -> Option<String> {
+        let (text, selection) = parse(marked);
+        toggle_case(&text, selection).map(|edit| apply(&text, edit))
+    }
+
+    #[test]
+    fn toggle_case_raises_then_lowers() {
+        assert_eq!(cased("let max_size|;").as_deref(), Some("let [MAX_SIZE];"));
+        assert_eq!(cased("let [MAX_SIZE];").as_deref(), Some("let [max_size];"));
+        assert_eq!(cased("[Mixed Case]").as_deref(), Some("[MIXED CASE]"));
+        assert_eq!(cased("a | b"), None);
+        assert_eq!(cased("[123]"), None);
+    }
+
+    fn joined(marked: &str) -> Option<String> {
+        let (text, selection) = parse(marked);
+        join_lines(&text, selection).map(|edit| apply(&text, edit))
+    }
+
+    #[test]
+    fn join_lines_pulls_the_next_line_up() {
+        assert_eq!(
+            joined("let a =|  \n    1;\nnext").as_deref(),
+            Some("let a = |1;\nnext")
+        );
+        assert_eq!(
+            joined("[one\n  two\n  thr]ee").as_deref(),
+            Some("one two |three")
+        );
+        assert_eq!(joined("text|\n\nmore").as_deref(), Some("text|\nmore"));
+        assert_eq!(joined("last|"), None);
+    }
+
+    fn sorted(marked: &str) -> Option<String> {
+        let (text, selection) = parse(marked);
+        sort_lines(&text, selection).map(|edit| apply(&text, edit))
+    }
+
+    #[test]
+    fn sort_lines_orders_the_selected_lines() {
+        assert_eq!(
+            sorted("top\n[pear\nApple\nbanana\n]end").as_deref(),
+            Some("top\n[Apple\nbanana\npear]\nend")
+        );
+        assert_eq!(sorted("[a\nb]"), None);
+        assert_eq!(sorted("on|ly"), None);
     }
 }

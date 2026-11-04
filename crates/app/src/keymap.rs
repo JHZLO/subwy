@@ -105,6 +105,9 @@ actions!(
         CommentLines,
         GoToLine,
         SelectNextOccurrence,
+        ToggleCase,
+        JoinLines,
+        SortLines,
     ]
 );
 
@@ -265,6 +268,10 @@ fn own_keys() -> Vec<Own> {
         own("cmd-/", CommentLines, Some(EDITOR_INPUT)),
         own("cmd-l", GoToLine, Some(EDITOR_INPUT)),
         own("ctrl-g", SelectNextOccurrence, Some(EDITOR_INPUT)),
+        own("cmd-shift-u", ToggleCase, Some(EDITOR_INPUT)),
+        own("ctrl-shift-j", JoinLines, Some(EDITOR_INPUT)),
+        // IntelliJ's Sort Lines has no key; Sublime Text's.
+        own("f9", SortLines, Some(EDITOR_INPUT)),
         // The terminal (IntelliJ's Alt+F12). Keys without a binding go to the shell.
         own("alt-f12", ToggleTerminal, ws),
         own("cmd-c", CopySelection, Some(TERMINAL)),

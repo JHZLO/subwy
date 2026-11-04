@@ -29,9 +29,9 @@ use subwy_project::{
 
 use crate::{
     keymap::{
-        CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, IndentItem, MARKDOWN,
-        MoveLineDown, MoveLineUp, Newline, OutdentItem, SelectNextOccurrence, ToggleBold,
-        ToggleItalic, ToggleTask,
+        CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, IndentItem, JoinLines,
+        MARKDOWN, MoveLineDown, MoveLineUp, Newline, OutdentItem, SelectNextOccurrence, SortLines,
+        ToggleBold, ToggleCase, ToggleItalic, ToggleTask,
     },
     preview::Preview,
     theme::{self, Palette, c, size, z},
@@ -1754,6 +1754,27 @@ impl EditorTabs {
         });
     }
 
+    /// Cmd+Shift+U: the selection, or the word at the caret, in capitals or small letters.
+    fn toggle_case(&mut self, _: &ToggleCase, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_text(false, window, cx, |text, selection| {
+            lines::toggle_case(&text.to_string(), selection).map(|edit| (0, edit))
+        });
+    }
+
+    /// Ctrl+Shift+J: the next line, or the selected lines, joined onto the caret's.
+    fn join_lines(&mut self, _: &JoinLines, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_text(false, window, cx, |text, selection| {
+            lines::join_lines(&text.to_string(), selection).map(|edit| (0, edit))
+        });
+    }
+
+    /// F9: the selected lines in order.
+    fn sort_lines(&mut self, _: &SortLines, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_text(false, window, cx, |text, selection| {
+            lines::sort_lines(&text.to_string(), selection).map(|edit| (0, edit))
+        });
+    }
+
     /// Alt+Shift+Up and Down: the lines under the selection trade places with the next one.
     fn move_line(&mut self, up: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_text(false, window, cx, |text, selection| {
@@ -2135,6 +2156,9 @@ impl Render for EditorTabs {
             .on_action(cx.listener(Self::delete_line))
             .on_action(cx.listener(Self::comment_lines))
             .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::toggle_case))
+            .on_action(cx.listener(Self::join_lines))
+            .on_action(cx.listener(Self::sort_lines))
             // Escape drops the extra selections, and with them Ctrl+G's run.
             .capture_action(cx.listener(|this, _: &Escape, _, _| this.occurrences = None))
             .on_action(

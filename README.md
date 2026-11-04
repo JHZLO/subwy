@@ -131,6 +131,9 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Cmd+/` | Comment out the lines, or take the comments off (`//`, `#`, `--` or `<!-- -->`, by the language) |
 | | `Cmd+L` | Go to a line: the finder opens with `:`, type `12` or `12:5` (line, column) and `Enter` |
 | | `Ctrl+G` | Select the word at the caret, then each next place it is as well, so typing changes them all (`Esc` to stop) |
+| | `Cmd+Shift+U` | Change the selection, or the word at the caret, to capitals, or back to small letters |
+| | `Ctrl+Shift+J` | Join the next line onto this one (every line the selection touches), its indent dropped |
+| | `F9` | Sort the selected lines, letter case aside |
 | Markdown | `Enter`, `Tab`, `Shift+Tab` | Continue a list, indent or outdent a list item |
 | | `Cmd+B`, `Cmd+I` | Bold, italic |
 | | `Cmd+Enter` | Tick or untick the task on each selected line (a list item gets a box, a line of text becomes a task) |

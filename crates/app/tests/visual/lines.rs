@@ -1,5 +1,5 @@
 //! IntelliJ's line keys in a code tab: duplicate, delete, move and comment out lines, go to one,
-//! select the next occurrence.
+//! select the next occurrence, change case, join and sort.
 
 use std::fs;
 
@@ -86,6 +86,36 @@ pub fn run(check: &mut Check) {
     );
 
     next_occurrence(check);
+    case_join_sort(check);
+}
+
+/// Cmd+Shift+U raises the caret's word, Ctrl+Shift+J joins the next line, F9 sorts the lines.
+fn case_join_sort(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("h.rs"), "pear\n  apple\nfig\n").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter");
+    expect_text(
+        check,
+        window,
+        "cmd-shift-u",
+        "cmd-shift-u raises the word at the caret",
+        "PEAR\n  apple\nfig\n",
+    );
+    expect_text(
+        check,
+        window,
+        "ctrl-shift-j",
+        "ctrl-shift-j joins the next line without its indent",
+        "PEAR apple\nfig\n",
+    );
+    expect_text(
+        check,
+        window,
+        "cmd-a f9",
+        "f9 sorts the selected lines",
+        "fig\nPEAR apple\n",
+    );
 }
 
 /// Ctrl+G takes the caret's word, then the next place it is as a whole word, so typing changes both.
