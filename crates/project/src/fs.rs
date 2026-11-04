@@ -332,6 +332,34 @@ fn create_temp_beside(target: &Path) -> io::Result<(PathBuf, std::fs::File)> {
     }
 }
 
+/// Writes `bytes` to a new file in the folder `dir`, made if missing: `{stem}-1.{ext}`, or the
+/// first of `-2`, `-3`, ... that is free. Returns its path; nothing that exists is replaced.
+pub fn write_new(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let mut n = 1;
+    loop {
+        let path = dir.join(format!("{stem}-{n}.{ext}"));
+        // `create_new` checks and creates in one step, so a file that appears meanwhile is kept.
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                if let Err(err) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+                    // Only the half-written file this call made, as a failed save drops its
+                    // temporary file.
+                    let _ = std::fs::remove_file(&path);
+                    return Err(err);
+                }
+                return Ok(path);
+            }
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => n += 1,
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 /// The path a file should be written to: a symlink's target, so saving never replaces the link.
 pub fn write_target(path: &Path) -> PathBuf {
     if let Ok(target) = std::fs::canonicalize(path) {
@@ -1191,6 +1219,23 @@ mod tests {
         assert_eq!(free_name(dir, ".env", EntryKind::File), ".env copy");
         std::fs::create_dir(dir.join("v1.2")).unwrap();
         assert_eq!(free_name(dir, "v1.2", EntryKind::Dir), "v1.2 copy");
+    }
+
+    #[test]
+    fn a_new_file_takes_the_next_free_number() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("images");
+        let first = write_new(&dir, "note", "png", b"one").unwrap();
+        assert_eq!(first, dir.join("note-1.png"));
+        write(&dir.join("note-2.png"), "kept");
+        let next = write_new(&dir, "note", "png", b"two").unwrap();
+        assert_eq!(next, dir.join("note-3.png"));
+        assert_eq!(std::fs::read(&first).unwrap(), b"one");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("note-2.png")).unwrap(),
+            "kept"
+        );
+        assert_eq!(std::fs::read(&next).unwrap(), b"two");
     }
 
     #[test]

@@ -413,6 +413,27 @@ fn has_scheme(target: &str) -> bool {
     })
 }
 
+/// The folder, beside a Markdown file, that pictures pasted into it go to.
+pub const IMAGE_DIR: &str = "images";
+
+/// The picture at `path` (relative, `/` between folders) as Markdown. What a link destination
+/// cannot hold as it is (spaces, brackets) or would read otherwise (`%`, `#`, `?`) is written
+/// `%XX`; the rest, Hangul included, stays readable.
+pub fn image_link(path: &str) -> String {
+    let mut out = String::from("![](");
+    for ch in path.chars() {
+        if ch == ' ' || ch.is_control() || "()<>%#?\\".contains(ch) {
+            for byte in ch.encode_utf8(&mut [0; 4]).bytes() {
+                let _ = write!(out, "%{byte:02X}");
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push(')');
+    out
+}
+
 /// `text` with every byte but letters, digits and `-._~` written as `%XX`, so it fits in a URI.
 pub fn percent_encode(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -777,5 +798,17 @@ mod tests {
         assert!(percent_encode(target).bytes().all(|b| b.is_ascii_graphic()));
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%zz%41"), "%zzA");
+    }
+
+    #[test]
+    fn image_links_escape_only_what_a_destination_cannot_hold() {
+        assert_eq!(image_link("images/note-1.png"), "![](images/note-1.png)");
+        let path = "images/\u{d55c}\u{ae00} (draft) #1?%.png";
+        let link = image_link(path);
+        assert_eq!(
+            link,
+            "![](images/\u{d55c}\u{ae00}%20%28draft%29%20%231%3F%25.png)"
+        );
+        assert_eq!(percent_decode(&link[4..link.len() - 1]), path);
     }
 }

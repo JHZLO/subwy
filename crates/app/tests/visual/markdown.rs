@@ -2,7 +2,7 @@
 
 use std::{fs, path::PathBuf};
 
-use gpui_kit::AnyWindowHandle;
+use gpui_kit::{AnyWindowHandle, ClipboardItem, Image, ImageFormat};
 
 use crate::check::Check;
 
@@ -158,6 +158,57 @@ pub fn run(check: &mut Check) {
 
     edges(check);
     backspace_indent(check);
+    pastes_pictures(check);
+}
+
+/// A picture on the clipboard (a screenshot) pastes into Markdown as a file in images/ beside it
+/// and a link to that file; text still pastes as text.
+fn pastes_pictures(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("note.md"), "# Note\n").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter cmd-down");
+
+    let mut png = Vec::new();
+    image::RgbaImage::from_pixel(4, 4, image::Rgba([0, 128, 0, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("png");
+    check
+        .cx
+        .write_to_clipboard(ClipboardItem::new_image(&Image::from_bytes(
+            ImageFormat::Png,
+            png.clone(),
+        )));
+    check.keys(window, "cmd-v");
+    let linked = "# Note\n![](images/note-1.png)";
+    check.wait_until(|check| {
+        check
+            .workspace(window, |w, cx| w.active_text(cx))
+            .as_deref()
+            == Some(linked)
+    });
+    let text = check.workspace(window, |w, cx| w.active_text(cx));
+    check.expect_eq(
+        "markdown: a pasted picture puts its link in",
+        text.as_deref(),
+        Some(linked),
+    );
+    check.expect_eq(
+        "markdown: the pasted picture is saved in images/ beside the file",
+        fs::read(dir.path().join("images/note-1.png")).ok(),
+        Some(png),
+    );
+
+    check
+        .cx
+        .write_to_clipboard(ClipboardItem::new_string(" text".to_string()));
+    expect_text(
+        check,
+        window,
+        "cmd-v",
+        "markdown: text still pastes as text",
+        "# Note\n![](images/note-1.png) text",
+    );
 }
 
 /// Backspace in a line's indent takes a whole indent at once (a list's own, or the tab size);

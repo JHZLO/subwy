@@ -12,8 +12,8 @@ use gpui_kit::component::{
     button::Button,
     dialog::{DialogEntrance, DialogFooter},
     input::{
-        DefinitionProvider, Editor, EditorState, Escape, InputEvent, MoveDown, MoveUp, Position,
-        Rope, RopeExt as _, TabSize,
+        DefinitionProvider, Editor, EditorState, Escape, InputEvent, MoveDown, MoveUp, Paste,
+        Position, Rope, RopeExt as _, TabSize,
     },
     tooltip::Tooltip,
 };
@@ -1615,6 +1615,49 @@ impl EditorTabs {
         });
     }
 
+    /// Cmd+V in a Markdown tab with a picture on the clipboard and no text (a screenshot): the
+    /// picture goes into the images folder beside the file, written off the main thread, and a
+    /// link to it in place of the selection. Any other paste is gpui-kit's, which skips pictures.
+    fn paste_image(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(editor), Some(tab)) = (self.typing_editor(true, window, cx), self.active_tab())
+        else {
+            return;
+        };
+        let Some(image) = cx.read_from_clipboard().and_then(|item| {
+            item.into_entries().find_map(|entry| match entry {
+                ClipboardEntry::Image(image) => Some(image),
+                _ => None,
+            })
+        }) else {
+            return;
+        };
+        cx.stop_propagation();
+        let file = self.abs(&tab.path);
+        let dir = file.with_file_name(markdown::IMAGE_DIR);
+        let stem = file
+            .file_stem()
+            .map_or("image".into(), |s| s.to_string_lossy().into_owned());
+        let shown = tab.path.clone();
+        let write = cx.background_executor().spawn(async move {
+            fs::write_new(&dir, &stem, image.format.extension(), &image.bytes)
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let written = write.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                match written {
+                    Ok(path) => {
+                        let name = path.file_name().unwrap_or_default().to_string_lossy();
+                        let link = markdown::image_link(&format!("{}/{name}", markdown::IMAGE_DIR));
+                        editor.update(cx, |state, cx| state.replace(link, window, cx));
+                    }
+                    Err(err) => this.error = Some(format!("{}: {err}", shown.display())),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Cmd+D: the selection, or the caret's line, again right after it.
     fn duplicate_line(&mut self, _: &DuplicateLine, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_text(false, window, cx, |text, selection| {
@@ -1997,6 +2040,7 @@ impl Render for EditorTabs {
             .capture_action(
                 cx.listener(|this, _: &MoveUp, window, cx| this.past_edge(false, window, cx)),
             )
+            .capture_action(cx.listener(Self::paste_image))
             .on_action(cx.listener(Self::delete_indent))
             .on_action(cx.listener(Self::duplicate_line))
             .on_action(cx.listener(Self::delete_line))
