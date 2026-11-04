@@ -8,6 +8,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use unicode_width::UnicodeWidthStr;
+
 /// Replace `range` with `text`, then select `selection` (in the text after the edit).
 /// Both are relative to the start of the text the helper was given.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -411,6 +413,154 @@ fn has_scheme(target: &str) -> bool {
                 .chars()
                 .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.'))
     })
+}
+
+/// Tab (Shift+Tab going back) in a Markdown table row: the table lined up, each column as wide
+/// on screen as its widest cell (Hangul takes two columns), and the next (previous) cell's text
+/// selected. Tab in the last cell adds a row. None outside a table (rows that start with `|`,
+/// the second a delimiter row), so Tab keeps its other uses.
+pub fn table_tab(text: &str, caret: usize, back: bool) -> Option<Edit> {
+    let is_row = |line: &str| line.trim_start().starts_with('|');
+    let line_start = |at: usize| text[..at].rfind('\n').map_or(0, |i| i + 1);
+    let line_end = |at: usize| text[at..].find('\n').map_or(text.len(), |i| at + i);
+    let here = line_start(caret);
+    if !is_row(&text[here..line_end(here)]) {
+        return None;
+    }
+    let mut start = here;
+    while start > 0 && is_row(&text[line_start(start - 1)..start - 1]) {
+        start = line_start(start - 1);
+    }
+    let mut end = line_end(here);
+    while end < text.len() && is_row(&text[end + 1..line_end(end + 1)]) {
+        end = line_end(end + 1);
+    }
+    let lines: Vec<&str> = text[start..end].split('\n').collect();
+    let mut rows: Vec<Vec<String>> = lines.iter().map(|line| table_cells(line)).collect();
+    let delimiter = |cell: &String| {
+        let dashes = cell.trim_start_matches(':').trim_end_matches(':');
+        !dashes.is_empty() && dashes.chars().all(|ch| ch == '-')
+    };
+    if rows.len() < 2 || !rows[1].iter().all(delimiter) {
+        return None;
+    }
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
+    for row in &mut rows {
+        row.resize(columns, String::new());
+    }
+    let aligns: Vec<(bool, bool)> = rows[1]
+        .iter()
+        .map(|cell| (cell.starts_with(':'), cell.ends_with(':')))
+        .collect();
+    let widths: Vec<usize> = (0..columns)
+        .map(|i| {
+            rows.iter()
+                .enumerate()
+                .filter(|(r, _)| *r != 1)
+                .map(|(_, row)| UnicodeWidthStr::width(row[i].as_str()))
+                .max()
+                .unwrap_or(0)
+                .max(3)
+        })
+        .collect();
+
+    // The cell to go to: along the row, then on to the next one past the delimiter row.
+    let row = text[start..here].matches('\n').count();
+    let column = unescaped_pipes(&lines[row][..caret - here])
+        .saturating_sub(1)
+        .min(columns - 1);
+    let (to_row, to_column) = match back {
+        true => match (row, column) {
+            (0, 0) => (0, 0),
+            (1, _) | (2, 0) => (0, columns - 1),
+            (r, 0) => (r - 1, columns - 1),
+            (r, c) => (r, c - 1),
+        },
+        false => match (row, column) {
+            (1, _) => (2, 0),
+            (r, c) if c + 1 < columns => (r, c + 1),
+            (0, _) => (2, 0),
+            (r, _) => (r + 1, 0),
+        },
+    };
+    if to_row == rows.len() {
+        rows.push(vec![String::new(); columns]);
+    }
+
+    let indent = blank_prefix(lines[0]);
+    let mut out = String::new();
+    let mut selection = 0..0;
+    for (r, cells) in rows.iter().enumerate() {
+        if r > 0 {
+            out.push('\n');
+        }
+        out.push_str(indent);
+        out.push('|');
+        for (i, cell) in cells.iter().enumerate() {
+            let (width, (left, right)) = (widths[i], aligns[i]);
+            out.push(' ');
+            if r == 1 {
+                let dashes = width - usize::from(left) - usize::from(right);
+                out.push_str(if left { ":" } else { "" });
+                out.push_str(&"-".repeat(dashes));
+                out.push_str(if right { ":" } else { "" });
+            } else {
+                let fill = width - UnicodeWidthStr::width(cell.as_str());
+                let before = match (left, right) {
+                    (false, true) => fill,
+                    (true, true) => fill / 2,
+                    _ => 0,
+                };
+                out.push_str(&" ".repeat(before));
+                if (r, i) == (to_row, to_column) {
+                    selection = start + out.len()..start + out.len() + cell.len();
+                }
+                out.push_str(cell);
+                out.push_str(&" ".repeat(fill - before));
+            }
+            out.push_str(" |");
+        }
+    }
+    let unchanged = out == text[start..end];
+    Some(Edit {
+        range: if unchanged { start..start } else { start..end },
+        text: if unchanged { String::new() } else { out },
+        selection,
+    })
+}
+
+/// A table row's cells, trimmed: split at each `|` that is not escaped, the outer ones dropped.
+fn table_cells(line: &str) -> Vec<String> {
+    let line = line.trim();
+    let line = line.strip_prefix('|').unwrap_or(line);
+    let line = match line.ends_with('|') && !line.ends_with("\\|") {
+        true => &line[..line.len() - 1],
+        false => line,
+    };
+    let mut cells = vec![String::new()];
+    let mut escaped = false;
+    for ch in line.chars() {
+        if ch == '|' && !escaped {
+            cells.push(String::new());
+        } else if let Some(cell) = cells.last_mut() {
+            cell.push(ch);
+        }
+        escaped = ch == '\\' && !escaped;
+    }
+    cells.iter().map(|cell| cell.trim().to_string()).collect()
+}
+
+/// How many `|` in `text` are not escaped with a backslash.
+fn unescaped_pipes(text: &str) -> usize {
+    let mut escaped = false;
+    let mut count = 0;
+    for ch in text.chars() {
+        if ch == '|' && !escaped {
+            count += 1;
+        }
+        escaped = ch == '\\' && !escaped;
+    }
+    count
 }
 
 /// The words (runs between spaces that hold a letter or digit, so a lone `-` or `#` is not one)
@@ -923,6 +1073,71 @@ mod tests {
             out.insert(start, '{');
         }
         Some(out)
+    }
+
+    /// Tab (or Shift+Tab with `back`) with the caret at `^` in `marked`: the text after, with `^`
+    /// where the selection starts, and the selected text.
+    fn tab(marked: &str, back: bool) -> Option<(String, String)> {
+        let caret = marked.find('^').expect("caret");
+        let text = marked.replacen('^', "", 1);
+        let edit = table_tab(&text, caret, back)?;
+        let mut out = text;
+        out.replace_range(edit.range, &edit.text);
+        let selected = out[edit.selection.clone()].to_string();
+        out.insert(edit.selection.start, '^');
+        Some((out, selected))
+    }
+
+    #[test]
+    fn tab_lines_up_a_table_and_selects_the_next_cell() {
+        assert_eq!(
+            tab("| a^ | bb |\n|-|-|\n| ccc | d |", false),
+            Some((
+                "| a   | ^bb  |\n| --- | --- |\n| ccc | d   |".to_string(),
+                "bb".to_string()
+            ))
+        );
+        // Hangul takes two columns; Tab in the last cell adds a row.
+        assert_eq!(
+            tab(
+                "| \u{c774}\u{b984} | x |\n|---|---|\n| \u{ac00} | yy^ |",
+                false
+            ),
+            Some((
+                "| \u{c774}\u{b984} | x   |\n| ---- | --- |\n| \u{ac00}   | yy  |\n| ^     |     |"
+                    .to_string(),
+                String::new()
+            ))
+        );
+        // Shift+Tab from a row's first cell goes back past the delimiter row.
+        assert_eq!(
+            tab("| a | b |\n|---|---|\n| ^x | y |", true),
+            Some((
+                "| a   | ^b   |\n| --- | --- |\n| x   | y   |".to_string(),
+                "b".to_string()
+            ))
+        );
+        assert_eq!(
+            tab("| a^ | b | c |\n|:-|-:|:-:|\n| x | y | z |", false),
+            Some((
+                "| a   |   ^b |  c  |\n| :-- | --: | :-: |\n| x   |   y |  z  |".to_string(),
+                "b".to_string()
+            ))
+        );
+        assert_eq!(
+            tab("| a\\|b^ | c |\n|-|-|", false),
+            Some((
+                "| a\\|b | ^c   |\n| ---- | --- |".to_string(),
+                "c".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn tab_leaves_what_is_not_a_table() {
+        assert_eq!(table_tab("a | b", 2, false), None);
+        assert_eq!(table_tab("| a |\n| b |", 2, false), None);
+        assert_eq!(table_tab("- item", 3, false), None);
     }
 
     #[test]

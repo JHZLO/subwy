@@ -6591,6 +6591,7 @@ dependencies = [
  "tempfile",
  "trash",
  "unicode-normalization",
+ "unicode-width",
 ]
 
 [[package]]

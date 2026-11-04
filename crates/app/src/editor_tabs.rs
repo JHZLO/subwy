@@ -1886,16 +1886,24 @@ impl EditorTabs {
         });
     }
 
+    /// Tab: in a table, lines it up and goes to the next cell; on a list item, indents it.
     fn indent_item(&mut self, _: &IndentItem, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_markdown(window, cx, |text, selection| {
+            if let Some(edit) = markdown::table_tab(&text.to_string(), selection.start, false) {
+                return Some((0, edit));
+            }
             let (row, start, line) = single_line(text, &selection)?;
             let local = selection.start - start..selection.end - start;
             markdown::indent(&line, local, &list_unit(text, row)).map(|edit| (start, edit))
         });
     }
 
+    /// Shift+Tab: in a table, lines it up and goes to the cell before; on a list item, outdents it.
     fn outdent_item(&mut self, _: &OutdentItem, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_markdown(window, cx, |text, selection| {
+            if let Some(edit) = markdown::table_tab(&text.to_string(), selection.start, true) {
+                return Some((0, edit));
+            }
             let (row, start, line) = single_line(text, &selection)?;
             let local = selection.start - start..selection.end - start;
             markdown::outdent(&line, local, &list_unit(text, row)).map(|edit| (start, edit))

@@ -30,6 +30,9 @@ smol = "2"
 tempfile = "3"
 trash = "5"
 unicode-normalization = "0.1"
+# Already in the graph through alacritty_terminal and gpui-component: how many columns a character
+# takes, so a Markdown table with Hangul in it lines up.
+unicode-width = "0.2"
 
 [profile.release]
 lto = "thin"

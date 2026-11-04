@@ -162,6 +162,29 @@ pub fn run(check: &mut Check) {
     pastes_links(check);
     ticks_tasks(check);
     counts_words(check);
+    lines_up_tables(check);
+}
+
+/// Tab in a table lines it up and selects the next cell, so typing fills it.
+fn lines_up_tables(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("note.md"), "| a | bb |\n|-|-|\n| ccc | d |").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter right right");
+    expect_text(
+        check,
+        window,
+        "tab",
+        "markdown: tab lines up the table",
+        "| a   | bb  |\n| --- | --- |\n| ccc | d   |",
+    );
+    type_text(check, window, "X");
+    let text = check.workspace(window, |w, cx| w.active_text(cx));
+    check.expect_eq(
+        "markdown: and selects the next cell, so typing replaces it",
+        text.as_deref(),
+        Some("| a   | X  |\n| --- | --- |\n| ccc | d   |"),
+    );
 }
 
 /// The status bar counts a Markdown tab's words and characters, or the selection's.
