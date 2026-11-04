@@ -161,6 +161,28 @@ pub fn run(check: &mut Check) {
     pastes_pictures(check);
     pastes_links(check);
     ticks_tasks(check);
+    counts_words(check);
+}
+
+/// The status bar counts a Markdown tab's words and characters, or the selection's.
+fn counts_words(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("note.md"), "one two three").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter");
+    let counts = check.workspace(window, |w, cx| w.counts(cx));
+    check.expect_eq(
+        "markdown: the status bar counts words and characters",
+        counts,
+        Some((3, 13, false)),
+    );
+    check.keys(window, "cmd-down alt-shift-left");
+    let counts = check.workspace(window, |w, cx| w.counts(cx));
+    check.expect_eq(
+        "markdown: with a selection it counts the selection",
+        counts,
+        Some((1, 5, true)),
+    );
 }
 
 /// Cmd+Enter makes a line a task, ticks it, and unticks it.

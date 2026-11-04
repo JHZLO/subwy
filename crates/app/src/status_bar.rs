@@ -47,10 +47,26 @@ pub fn language_label(language: &str) -> String {
     label.to_string()
 }
 
+/// A Markdown tab's words and characters, of the selection when there is one.
+pub fn counts_label(words: usize, chars: usize, selected: bool) -> String {
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    let mut label = format!(
+        "{words} word{}, {chars} char{}",
+        plural(words),
+        plural(chars)
+    );
+    if selected {
+        label.push_str(" selected");
+    }
+    label
+}
+
 pub struct Status<'a> {
     /// The stem: the relative path (and cursor line) of what has focus.
     pub stem: Option<&'a str>,
     pub copied: Option<&'a Copied>,
+    /// Words and characters, in a Markdown tab.
+    pub counts: Option<String>,
     pub language: Option<&'a str>,
     pub line_ending: Option<&'a str>,
     pub zoom: u32,
@@ -127,6 +143,7 @@ pub fn render(status: Status<'_>, cx: &App) -> impl IntoElement {
             div()
                 .flex()
                 .gap_4()
+                .children(status.counts)
                 .children(status.language.map(str::to_string))
                 .children(status.line_ending.map(str::to_string))
                 .children(status.language.map(|_| "UTF-8"))

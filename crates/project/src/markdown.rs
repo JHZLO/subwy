@@ -413,6 +413,17 @@ fn has_scheme(target: &str) -> bool {
     })
 }
 
+/// The words (runs between spaces that hold a letter or digit, so a lone `-` or `#` is not one)
+/// and the characters (line breaks aside) of `text`, as the status bar counts a Markdown tab.
+pub fn counts(text: &str) -> (usize, usize) {
+    let words = text
+        .split_whitespace()
+        .filter(|word| word.chars().any(char::is_alphanumeric))
+        .count();
+    let chars = text.chars().filter(|&ch| ch != '\n' && ch != '\r').count();
+    (words, chars)
+}
+
 /// Cmd+Enter: the lines under the selection tick or untick their task box. A list item without a
 /// box gets an empty one and a line of text becomes an open task; blank lines and quotes stay.
 /// A selection that ends at the start of a line leaves that line out. None when no line changes.
@@ -912,6 +923,13 @@ mod tests {
             out.insert(start, '{');
         }
         Some(out)
+    }
+
+    #[test]
+    fn counts_words_with_letters_and_characters_but_line_breaks() {
+        assert_eq!(counts(""), (0, 0));
+        assert_eq!(counts("# Title\n\n- one two\r\n"), (3, 16));
+        assert_eq!(counts("\u{d55c}\u{ae00} \u{b2e8}\u{c5b4}"), (2, 5));
     }
 
     #[test]

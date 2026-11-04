@@ -1,6 +1,7 @@
 //! Open files as tabs, each over one gpui-kit editor: the pass-through tab, the paper sheet, saving.
 
 use std::{
+    cell::RefCell,
     io,
     ops::Range,
     path::{Path, PathBuf},
@@ -125,6 +126,9 @@ struct PendingOpen {
     cursor: Option<(u32, u32)>,
 }
 
+/// What a word count was taken of: the editor, its edits, its length and the selection.
+type CountedOf = (EntityId, u64, usize, Range<usize>);
+
 pub struct EditorTabs {
     /// Where the tabs' relative paths are on disk.
     folders: Folders,
@@ -138,6 +142,11 @@ pub struct EditorTabs {
     closed: Vec<TabState>,
     /// The active tab's cursor lines as last reported, so caret blinks do not count as changes.
     last_lines: Option<(u32, u32)>,
+    /// The active tab's selection as last reported: the status bar counts it.
+    last_selection: Range<usize>,
+    /// The last words and characters counted, and of what (editor, edits, length, selection), so
+    /// the status bar does not count a long text again on every frame.
+    counted: RefCell<Option<(CountedOf, (usize, usize))>>,
     preview: Option<Entity<Preview>>,
     /// IntelliJ's Preview only: the preview takes the whole pane for a Markdown tab.
     preview_only: bool,
@@ -293,6 +302,8 @@ impl EditorTabs {
             restoring_active: None,
             closed: Vec::new(),
             last_lines: None,
+            last_selection: 0..0,
+            counted: RefCell::default(),
             preview: None,
             preview_only: false,
             split: 0.5,
@@ -594,6 +605,34 @@ impl EditorTabs {
         Some((start, end))
     }
 
+    /// The active Markdown tab's words and characters, of the selection when there is one (the
+    /// last value says so).
+    pub fn active_counts(&self, cx: &App) -> Option<(usize, usize, bool)> {
+        let tab = self.active_tab().filter(|t| t.is_markdown())?;
+        let state = tab.editor.read(cx);
+        let selection = state.selected_range();
+        let selected = !selection.is_empty();
+        let key = (
+            tab.editor.entity_id(),
+            tab.edits,
+            state.text().len(),
+            selection.clone(),
+        );
+        let mut counted = self.counted.borrow_mut();
+        if let Some((seen, counts)) = counted.as_ref()
+            && *seen == key
+        {
+            return Some((counts.0, counts.1, selected));
+        }
+        let text = match selected {
+            true => state.text().slice(selection).to_string(),
+            false => state.text().to_string(),
+        };
+        let counts = markdown::counts(&text);
+        *counted = Some((key, counts));
+        Some((counts.0, counts.1, selected))
+    }
+
     /// Opens `path` (relative to the open folder), or switches to it when it is already open.
     /// The file is read off the main thread; the tab appears when it has been read.
     pub fn open(
@@ -742,8 +781,10 @@ impl EditorTabs {
             cx.observe(&editor, |this, editor, cx| {
                 if this.active_tab().is_some_and(|t| t.editor == editor) {
                     let lines = this.active_lines(cx);
-                    if lines != this.last_lines {
+                    let selection = editor.read(cx).selected_range();
+                    if lines != this.last_lines || selection != this.last_selection {
                         this.last_lines = lines;
+                        this.last_selection = selection;
                         cx.emit(TabsChanged);
                         // The outline's station follows the cursor's line.
                         cx.notify();

@@ -953,6 +953,12 @@ impl Workspace {
     }
 
     /// The active tab's text as the editor holds it (tests read it to check editing keys).
+    /// The active Markdown tab's words and characters, and whether they are the selection's; for
+    /// the UI checks.
+    pub fn counts(&self, cx: &App) -> Option<(usize, usize, bool)> {
+        self.tabs.read(cx).active_counts(cx)
+    }
+
     /// Whether the editor and the preview show, and the editor's share of the width; for the UI checks.
     pub fn editor_panes(&self, cx: &App) -> (bool, bool, f32) {
         self.tabs.read(cx).panes()
@@ -1644,6 +1650,9 @@ impl Render for Workspace {
             subwy_project::fs::LineEnding::Lf => "LF",
             subwy_project::fs::LineEnding::Crlf => "CRLF",
         });
+        let counts = tabs
+            .active_counts(cx)
+            .map(|(words, chars, selected)| status_bar::counts_label(words, chars, selected));
         let zoom = cx.try_global::<theme::Zoom>().map_or(100, |z| z.0);
         let copied = self.copied.clone();
 
@@ -1840,6 +1849,7 @@ impl Render for Workspace {
                 Status {
                     stem: stem.as_deref(),
                     copied: copied.as_ref(),
+                    counts,
                     language: language.as_deref(),
                     line_ending,
                     zoom,
