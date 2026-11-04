@@ -29,9 +29,9 @@ use subwy_project::{
 
 use crate::{
     keymap::{
-        CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, IndentItem, JoinLines,
-        MARKDOWN, MoveLineDown, MoveLineUp, Newline, OutdentItem, SelectNextOccurrence, SortLines,
-        ToggleBold, ToggleCase, ToggleItalic, ToggleTask,
+        CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, ExtendSelection, IndentItem,
+        JoinLines, MARKDOWN, MoveLineDown, MoveLineUp, Newline, OutdentItem, SelectNextOccurrence,
+        ShrinkSelection, SortLines, ToggleBold, ToggleCase, ToggleItalic, ToggleTask,
     },
     preview::Preview,
     theme::{self, Palette, c, size, z},
@@ -161,6 +161,15 @@ pub struct EditorTabs {
     /// Ctrl+G's run: gpui-kit tells only the first of several selections, so the one added last
     /// is kept here to go on from.
     occurrences: Option<Occurrences>,
+    /// Alt+Up's run in one editor, for Alt+Down to go back through.
+    extended: Option<Extended>,
+}
+
+/// The selections Alt+Up grew from, and the one it made last: a run goes on only from that one.
+struct Extended {
+    editor: EntityId,
+    earlier: Vec<Range<usize>>,
+    now: Range<usize>,
 }
 
 impl EventEmitter<TabsChanged> for EditorTabs {}
@@ -314,6 +323,7 @@ impl EditorTabs {
             focus_handle: cx.focus_handle(),
             error: None,
             occurrences: None,
+            extended: None,
         }
     }
 
@@ -1812,6 +1822,67 @@ impl EditorTabs {
         });
     }
 
+    /// Alt+Up (IntelliJ's Extend Selection): the selection grows to the next stretch around it.
+    fn extend_selection(
+        &mut self,
+        _: &ExtendSelection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.typing_editor(false, window, cx) else {
+            cx.propagate();
+            return;
+        };
+        let (selection, text) = {
+            let state = editor.read(cx);
+            (state.selected_range(), state.text().to_string())
+        };
+        let Some(wider) = lines::extend_selection(&text, selection.clone()) else {
+            return;
+        };
+        let id = editor.entity_id();
+        let mut run = self
+            .extended
+            .take()
+            .filter(|run| run.editor == id && run.now == selection)
+            .unwrap_or(Extended {
+                editor: id,
+                earlier: Vec::new(),
+                now: selection.clone(),
+            });
+        run.earlier.push(selection);
+        run.now = wider.clone();
+        self.extended = Some(run);
+        editor.update(cx, |state, cx| state.set_selected_range(wider, cx));
+    }
+
+    /// Alt+Down (IntelliJ's Shrink Selection): back to the selection before the last Alt+Up.
+    fn shrink_selection(
+        &mut self,
+        _: &ShrinkSelection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(editor) = self.typing_editor(false, window, cx) else {
+            cx.propagate();
+            return;
+        };
+        let selection = editor.read(cx).selected_range();
+        let id = editor.entity_id();
+        let Some(run) = self
+            .extended
+            .as_mut()
+            .filter(|run| run.editor == id && run.now == selection)
+        else {
+            return;
+        };
+        let Some(narrower) = run.earlier.pop() else {
+            return;
+        };
+        run.now = narrower.clone();
+        editor.update(cx, |state, cx| state.set_selected_range(narrower, cx));
+    }
+
     /// Cmd+Shift+U: the selection, or the word at the caret, in capitals or small letters.
     fn toggle_case(&mut self, _: &ToggleCase, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_text(false, window, cx, |text, selection| {
@@ -2225,6 +2296,8 @@ impl Render for EditorTabs {
             .on_action(cx.listener(Self::toggle_case))
             .on_action(cx.listener(Self::join_lines))
             .on_action(cx.listener(Self::sort_lines))
+            .on_action(cx.listener(Self::extend_selection))
+            .on_action(cx.listener(Self::shrink_selection))
             // Escape drops the extra selections, and with them Ctrl+G's run.
             .capture_action(cx.listener(|this, _: &Escape, _, _| this.occurrences = None))
             .on_action(

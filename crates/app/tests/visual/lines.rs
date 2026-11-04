@@ -87,6 +87,34 @@ pub fn run(check: &mut Check) {
 
     next_occurrence(check);
     case_join_sort(check);
+    extends_selection(check);
+}
+
+/// Alt+Up grows the selection from the caret's word to the quotes around it; Alt+Down goes back.
+fn extends_selection(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    fs::write(dir.path().join("e.rs"), "let x = foo(a, \"b c\");\n").expect("write");
+    let window = check.open(Some(dir.path()));
+    check.keys(window, "down down enter");
+    check.keys(window, &["right"; 17].join(" "));
+    check.keys(window, "alt-up alt-up");
+    type_text(check, window, "X");
+    let text = check.workspace(window, |w, cx| w.active_text(cx));
+    check.expect_eq(
+        "alt-up twice selects inside the quotes",
+        text.as_deref(),
+        Some("let x = foo(a, \"X\");\n"),
+    );
+    check.keys(window, "cmd-z cmd-left");
+    check.keys(window, &["right"; 17].join(" "));
+    check.keys(window, "alt-up alt-up alt-down");
+    type_text(check, window, "Y");
+    let text = check.workspace(window, |w, cx| w.active_text(cx));
+    check.expect_eq(
+        "alt-down goes back to the word",
+        text.as_deref(),
+        Some("let x = foo(a, \"Y c\");\n"),
+    );
 }
 
 /// Cmd+Shift+U raises the caret's word, Ctrl+Shift+J joins the next line, F9 sorts the lines.

@@ -274,6 +274,113 @@ fn word_at(text: &str, offset: usize) -> Option<Range<usize>> {
     (start < end).then_some(start..end)
 }
 
+/// Alt+Up (IntelliJ's Extend Selection): the smallest stretch around the selection that is larger
+/// than it: the word at the caret, inside a pair of quotes or brackets, the pair with them, the
+/// line without its indent, the whole line, the paragraph, all the text. None when all is selected.
+pub fn extend_selection(text: &str, selection: Range<usize>) -> Option<Range<usize>> {
+    let line = line_start(text, selection.start)..line_end(text, selection.end);
+    let mut candidates: Vec<Range<usize>> = word_at(text, selection.start).into_iter().collect();
+    for (open, close) in [('(', ')'), ('[', ']'), ('{', '}')] {
+        if let Some(pair) = enclosing_pair(text, &selection, open, close) {
+            candidates.push(pair.start + 1..pair.end - 1);
+            candidates.push(pair);
+        }
+    }
+    for quote in ['"', '`'] {
+        if let Some(pair) = enclosing_quotes(text, &line, &selection, quote) {
+            candidates.push(pair.start + 1..pair.end - 1);
+            candidates.push(pair);
+        }
+    }
+    let shown = &text[line.clone()];
+    let indent = shown.len() - shown.trim_start().len();
+    candidates.push(line.start + indent..line.start + shown.trim_end().len());
+    candidates.push(paragraph(text, &line));
+    candidates.push(line);
+    candidates.push(0..text.len());
+    candidates
+        .into_iter()
+        .filter(|c| {
+            c.start <= selection.start && c.end >= selection.end && c.len() > selection.len()
+        })
+        .min_by_key(|c| c.len())
+}
+
+/// The innermost `open` and `close` around `selection`, both included, nested pairs skipped.
+fn enclosing_pair(
+    text: &str,
+    selection: &Range<usize>,
+    open: char,
+    close: char,
+) -> Option<Range<usize>> {
+    let mut depth = 0usize;
+    let (start, _) = text[..selection.start]
+        .char_indices()
+        .rev()
+        .find(|&(_, c)| {
+            if c == close {
+                depth += 1;
+            } else if c == open {
+                if depth == 0 {
+                    return true;
+                }
+                depth -= 1;
+            }
+            false
+        })?;
+    let mut depth = 0usize;
+    let (end, _) = text[selection.end..].char_indices().find(|&(_, c)| {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            if depth == 0 {
+                return true;
+            }
+            depth -= 1;
+        }
+        false
+    })?;
+    Some(start..selection.end + end + close.len_utf8())
+}
+
+/// The quotes around `selection` on its `line`, both included: the last one before it that opens
+/// (an even number of them comes before it on the line) and the first one after it.
+fn enclosing_quotes(
+    text: &str,
+    line: &Range<usize>,
+    selection: &Range<usize>,
+    quote: char,
+) -> Option<Range<usize>> {
+    let before = &text[line.start..selection.start];
+    let open = before.rfind(quote)?;
+    if before[..open].matches(quote).count() % 2 == 1 {
+        return None;
+    }
+    let close = text[selection.end..line.end].find(quote)? + selection.end;
+    Some(line.start + open..close + quote.len_utf8())
+}
+
+/// The lines around `line` up to the blank lines on either side.
+fn paragraph(text: &str, line: &Range<usize>) -> Range<usize> {
+    let mut start = line.start;
+    while start > 0 {
+        let above = line_start(text, start - 1);
+        if text[above..start - 1].trim().is_empty() {
+            break;
+        }
+        start = above;
+    }
+    let mut end = line.end;
+    while end < text.len() {
+        let below = line_end(text, end + 1);
+        if text[end + 1..below].trim().is_empty() {
+            break;
+        }
+        end = below;
+    }
+    start..end
+}
+
 /// Ctrl+Shift+J (IntelliJ's Join Lines): the next line comes up onto the caret's, its indent
 /// dropped and one space between; a selection over several lines joins them all. The caret goes
 /// to the start of the last line joined. None on the last line.
@@ -509,5 +616,48 @@ mod tests {
         );
         assert_eq!(sorted("[a\nb]"), None);
         assert_eq!(sorted("on|ly"), None);
+    }
+
+    fn extended(marked: &str) -> Option<String> {
+        let (text, selection) = parse(marked);
+        extend_selection(&text, selection).map(|range| {
+            let edit = Edit {
+                range: 0..0,
+                text: String::new(),
+                selection: range,
+            };
+            apply(&text, edit)
+        })
+    }
+
+    #[test]
+    fn extend_selection_grows_step_by_step() {
+        let steps = [
+            "let x = foo(a, \"b| c\");",
+            "let x = foo(a, \"[b] c\");",
+            "let x = foo(a, \"[b c]\");",
+            "let x = foo(a, [\"b c\"]);",
+            "let x = foo([a, \"b c\"]);",
+            "let x = foo[(a, \"b c\")];",
+            "[let x = foo(a, \"b c\");]",
+        ];
+        for pair in steps.windows(2) {
+            assert_eq!(
+                extended(pair[0]).as_deref(),
+                Some(pair[1]),
+                "from {}",
+                pair[0]
+            );
+        }
+        assert_eq!(extended(steps[6]), None);
+        // Then the line with its indent, and the paragraph up to the blank line.
+        assert_eq!(
+            extended("top\n  [mid]\nlow\n\nnext").as_deref(),
+            Some("top\n[  mid]\nlow\n\nnext")
+        );
+        assert_eq!(
+            extended("top\n[  mid]\nlow\n\nnext").as_deref(),
+            Some("[top\n  mid\nlow]\n\nnext")
+        );
     }
 }

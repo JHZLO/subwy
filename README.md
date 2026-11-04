@@ -134,6 +134,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Cmd+Shift+U` | Change the selection, or the word at the caret, to capitals, or back to small letters |
 | | `Ctrl+Shift+J` | Join the next line onto this one (every line the selection touches), its indent dropped |
 | | `F9` | Sort the selected lines, letter case aside |
+| | `Alt+Up` / `Alt+Down` | Grow the selection (the word, inside quotes or brackets, with them, the line, the paragraph, all) / take the last step back |
 | Markdown | `Enter`, `Tab`, `Shift+Tab` | Continue a list, indent or outdent a list item |
 | | `Tab`, `Shift+Tab` in a table | Line the table up (Hangul counts two columns) and select the next or previous cell; in the last cell, add a row |
 | | `Cmd+B`, `Cmd+I` | Bold, italic |
