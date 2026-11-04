@@ -77,6 +77,35 @@ fn follows_the_editor(check: &mut Check) {
         true,
     );
 
+    // The editor scrolls on past its last line, where the preview has reached its end.
+    let editor = check
+        .cx
+        .update_window(window, |_, window, _| {
+            window
+                .try_find("preview-page")
+                .map(|page| point(page.bounds().left() - px(150.), px(200.)))
+        })
+        .expect("window")
+        .expect("preview page");
+    for _ in 0..10 {
+        check.cx.simulate_event(
+            window,
+            ScrollWheelEvent {
+                position: editor,
+                delta: ScrollDelta::Pixels(point(px(0.), px(-40.))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+            },
+        );
+        settle(check, window);
+    }
+    let past = top - page_top(check, window);
+    check.expect_eq(
+        "preview sync: scrolling past the editor's last line keeps it at the end",
+        past >= end,
+        true,
+    );
+
     check.keys(window, "cmd-up");
     settle(check, window);
     let back = top - page_top(check, window);

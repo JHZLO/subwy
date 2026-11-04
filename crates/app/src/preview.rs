@@ -156,7 +156,15 @@ impl Preview {
         if line.is_none() || line == self.top_line {
             return;
         }
+        // The editor scrolls on past its last line, half a screen; the preview, at its end by
+        // then, cannot follow further down, and finding each line it passes costs a reveal's
+        // frames (see `HideLines`) for no move.
+        let down = self.top_line.is_some() && line > self.top_line;
+        let at_end = self.scroll.offset().y <= -self.scroll.max_offset().y;
         self.top_line = line;
+        if down && at_end && !self.follow_pending {
+            return;
+        }
         self.follow_pending = true;
         self.line_up(cx);
     }
