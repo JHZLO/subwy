@@ -14,7 +14,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain from rust-toolchain.toml
         run: |
           channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
@@ -30,7 +30,7 @@ jobs:
         run: cargo test -p subwy --test visual
       - name: UI check screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual
           path: target/visual/
