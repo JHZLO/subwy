@@ -127,11 +127,12 @@ fn follows_the_editor(check: &mut Check) {
     for _ in 0..10 {
         check.cx.simulate_event(
             window,
-            ScrollWheelEvent {
+            ScrollEvent {
                 position: editor,
                 delta: ScrollDelta::Pixels(point(px(0.), px(-40.))),
                 modifiers: Modifiers::default(),
                 touch_phase: TouchPhase::Moved,
+                source: ScrollSource::Pointer,
             },
         );
         settle(check, window);

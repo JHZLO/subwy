@@ -276,7 +276,7 @@ impl TerminalPanel {
 
     /// The wheel scrolls the history; in a full-screen program (less, vim) it sends arrow keys,
     /// as other terminals do.
-    fn scroll(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn scroll(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
         let height = self.metrics.get().line_height;
         if height <= px(0.) {
             return;
@@ -331,7 +331,7 @@ impl Render for TerminalPanel {
             }))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
-            .on_scroll_wheel(cx.listener(Self::scroll))
+            .on_scroll(cx.listener(Self::scroll))
             .size_full()
             .bg(c(p.paper))
             .px(z(10., cx))

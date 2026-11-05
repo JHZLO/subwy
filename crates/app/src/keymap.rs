@@ -152,15 +152,8 @@ pub fn bind_overrides(overrides: &[KeyOverride], cx: &mut App) -> Option<String>
                 )),
                 None => None,
             };
-            KeyBinding::load(
-                &entry.key,
-                action,
-                context,
-                false,
-                None,
-                cx.keyboard_mapper().as_ref(),
-            )
-            .map_err(|err| format!("key {}: {err}", entry.key))
+            KeyBinding::load(&entry.key, action, context, false, None, cx)
+                .map_err(|err| format!("key {}: {err}", entry.key))
         });
         match binding {
             Ok(binding) => bindings.push(binding),
@@ -340,8 +333,7 @@ fn init(cx: &mut App) {
                     KeyBindingContextPredicate::parse(source).expect("subwy's own key context"),
                 )
             });
-            KeyBinding::load(key, action, context, false, None, &DummyKeyboardMapper)
-                .expect("subwy's own key")
+            KeyBinding::load(key, action, context, false, None, cx).expect("subwy's own key")
         })
         .collect();
     cx.bind_keys(bindings);

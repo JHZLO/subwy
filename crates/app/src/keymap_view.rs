@@ -112,7 +112,7 @@ impl KeymapView {
                     || row.label.to_lowercase().contains(&query)
                     || row.section.to_lowercase().contains(&query)
                     || row.keys.iter().any(|key| {
-                        key.contains(&query) || key_text(key).to_lowercase().contains(&query)
+                        key.contains(&query) || key_text(key, cx).to_lowercase().contains(&query)
                     })
             })
             .collect();
@@ -149,7 +149,7 @@ impl KeymapView {
             cx.notify();
             return;
         }
-        let key = keystroke.unparse();
+        let key = keystroke.unparse(cx.platform_info().os);
         let fallback = section(&action).map(|(_, _, context)| context);
         let defaults = keymap::defaults();
         update_settings(cx, |s| {
@@ -197,11 +197,11 @@ impl KeymapView {
                 } else if row.keys.is_empty() {
                     el.text_color(c(p.ignored)).child("No key")
                 } else {
-                    el.children(
-                        row.keys
-                            .iter()
-                            .filter_map(|key| Keystroke::parse(key).ok().map(Kbd::new)),
-                    )
+                    el.children(row.keys.iter().filter_map(|key| {
+                        Keystroke::parse_with_os(key, cx.platform_info().os)
+                            .ok()
+                            .map(Kbd::new)
+                    }))
                 }
             })
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -262,8 +262,8 @@ impl KeymapView {
 }
 
 /// A key as the page shows it: `cmd-shift-f` as ⇧⌘F.
-fn key_text(key: &str) -> String {
-    Keystroke::parse(key)
+fn key_text(key: &str, cx: &App) -> String {
+    Keystroke::parse_with_os(key, cx.platform_info().os)
         .map(|stroke| Kbd::format(&stroke))
         .unwrap_or_else(|_| key.to_string())
 }
