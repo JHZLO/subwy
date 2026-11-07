@@ -2,9 +2,16 @@
 
 use std::fs;
 
+use gpui_kit::ClipboardItem;
+
 use crate::check::Check;
 
 pub fn run(check: &mut Check) {
+    saves_after_focus_loss(check);
+    pasted_returns_save_as_the_files_line_ending(check);
+}
+
+fn saves_after_focus_loss(check: &mut Check) {
     let dir = tempfile::tempdir().expect("temp dir");
     let (a, b) = (dir.path().join("a.md"), dir.path().join("b.md"));
     fs::write(&a, "alpha\n").expect("write");
@@ -41,4 +48,30 @@ pub fn run(check: &mut Check) {
         text,
         Some("ybeta\n".to_string()),
     );
+}
+
+/// Text copied from elsewhere may break its lines with `\r\n` or `\r`; pasted, it saves with the
+/// file's own line ending, so the file never turns mixed (and read-only).
+fn pasted_returns_save_as_the_files_line_ending(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (crlf, lf) = (dir.path().join("crlf.txt"), dir.path().join("lf.txt"));
+    fs::write(&crlf, "end\r\n").expect("write");
+    fs::write(&lf, "end\n").expect("write");
+    let window = check.open(Some(dir.path()));
+    check
+        .cx
+        .write_to_clipboard(ClipboardItem::new_string("one\r\ntwo\rthree\n".to_string()));
+
+    check.keys(window, "down down enter cmd-v");
+    check.update_workspace(window, |w, window, cx| w.save_edited(window, cx));
+    let saved = check.wait_until(|_| {
+        fs::read(&crlf).is_ok_and(|bytes| bytes == b"one\r\ntwo\r\nthree\r\nend\r\n")
+    });
+    check.expect_eq("a paste saves with a CRLF file's line ending", saved, true);
+
+    check.keys(window, "cmd-1 down enter cmd-v");
+    check.update_workspace(window, |w, window, cx| w.save_edited(window, cx));
+    let saved =
+        check.wait_until(|_| fs::read(&lf).is_ok_and(|bytes| bytes == b"one\ntwo\nthree\nend\n"));
+    check.expect_eq("a paste saves with an LF file's line ending", saved, true);
 }

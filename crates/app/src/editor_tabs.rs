@@ -1692,15 +1692,17 @@ impl EditorTabs {
         });
     }
 
-    /// Cmd+V in a Markdown tab. A web address over selected text makes the text its link. A
-    /// picture with no text (a screenshot) goes into the images folder beside the file, written
-    /// off the main thread, and a link to it in place of the selection. Any other paste is
-    /// gpui-kit's, which skips pictures.
-    fn paste_markdown(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(editor), Some(tab)) = (self.typing_editor(true, window, cx), self.active_tab())
+    /// Cmd+V. Pasted text breaks its lines with `\n` alone, as gpui-kit would keep a `\r`; see
+    /// [`fs::lf_text`]. In a Markdown tab a web address over selected text makes the text its
+    /// link, and a picture with no text (a screenshot) goes into the images folder beside the
+    /// file, written off the main thread, and a link to it in place of the selection. Any other
+    /// paste is gpui-kit's, which skips pictures.
+    fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(editor), Some(tab)) = (self.typing_editor(false, window, cx), self.active_tab())
         else {
             return;
         };
+        let is_markdown = tab.is_markdown();
         let Some(item) = cx.read_from_clipboard() else {
             return;
         };
@@ -1713,10 +1715,24 @@ impl EditorTabs {
                 .as_ref()
                 .is_some_and(|run| run.editor == editor.entity_id() && run.first == selection);
             let selected = state.text().slice(selection).to_string();
-            if let Some(link) = markdown::link_paste(&selected, &clipboard).filter(|_| !several) {
+            let link = is_markdown
+                .then(|| markdown::link_paste(&selected, &clipboard))
+                .flatten();
+            if let Some(text) = link
+                .or_else(|| fs::lf_text(&clipboard))
+                .filter(|_| !several)
+            {
                 cx.stop_propagation();
-                editor.update(cx, |state, cx| state.replace(link, window, cx));
+                editor.update(cx, |state, cx| {
+                    state.replace(text, window, cx);
+                    // Brings the caret into view after a long paste, as gpui-kit's paste does.
+                    let at = state.cursor_position();
+                    state.set_cursor_position(at, window, cx);
+                });
             }
+            return;
+        }
+        if !is_markdown {
             return;
         }
         let Some(image) = item.into_entries().find_map(|entry| match entry {
@@ -2280,7 +2296,7 @@ impl Render for EditorTabs {
             .capture_action(
                 cx.listener(|this, _: &MoveUp, window, cx| this.past_edge(false, window, cx)),
             )
-            .capture_action(cx.listener(Self::paste_markdown))
+            .capture_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::delete_indent))
             .on_action(cx.listener(Self::duplicate_line))
             .on_action(cx.listener(Self::delete_line))

@@ -257,6 +257,14 @@ pub fn read_text(path: &Path) -> Result<TextFile, ReadError> {
     })
 }
 
+/// Pasted text with its `\r\n` and lone `\r` turned into `\n`, as the editor holds a file's text;
+/// `None` when it has no `\r`. Kept, a `\r` would save beside the file's own line ending and
+/// leave it mixed, read-only the next time it opens.
+pub fn lf_text(text: &str) -> Option<String> {
+    text.contains('\r')
+        .then(|| text.replace("\r\n", "\n").replace('\r', "\n"))
+}
+
 /// Writes `text` (with `\n` endings) back with the file's own line ending and BOM.
 ///
 /// The bytes go to a temporary file in the same folder, reach the disk, and then replace the
@@ -876,6 +884,15 @@ mod tests {
         let file = read_text(&path).unwrap();
         assert_eq!(file.line_ending, LineEnding::Crlf);
         assert!(file.mixed_line_endings);
+    }
+
+    #[test]
+    fn pasted_returns_become_newlines() {
+        assert_eq!(lf_text("one\ntwo\n"), None);
+        assert_eq!(
+            lf_text("one\r\ntwo\rthree\n").as_deref(),
+            Some("one\ntwo\nthree\n")
+        );
     }
 
     #[test]
