@@ -560,7 +560,7 @@ impl Workspace {
                     panel.read(cx).focus_handle(cx).focus(window, cx);
                 }
                 PanelEvent::Hide => {
-                    this.tree_visible = false;
+                    this.show_tree(false, cx);
                     this.focus_editor_area(window, cx);
                     cx.notify();
                 }
@@ -1290,13 +1290,22 @@ impl Workspace {
             return;
         };
         if self.tree_focused(window, cx) {
-            self.tree_visible = false;
+            self.show_tree(false, cx);
             self.focus_editor_area(window, cx);
         } else {
-            self.tree_visible = true;
+            self.show_tree(true, cx);
             panel.read(cx).focus_handle(cx).focus(window, cx);
         }
         cx.notify();
+    }
+
+    /// The tab bar offers a hidden tree back, so it is told too.
+    fn show_tree(&mut self, visible: bool, cx: &mut Context<Self>) {
+        self.tree_visible = visible;
+        self.tabs.update(cx, |tabs, cx| {
+            tabs.tree_hidden = !visible;
+            cx.notify();
+        });
     }
 
     /// Opens the finder over the window, or closes it and gives focus back.

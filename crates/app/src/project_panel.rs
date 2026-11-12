@@ -2239,7 +2239,7 @@ fn list(folders: &Folders, dir: &Path) -> std::io::Result<Vec<subwy_project::fs:
 /// The header's icon buttons: square, the icon in `sub`, a hover fill, a tooltip.
 const HEADER_BUTTON: f32 = 22.;
 
-fn header_button(
+pub(crate) fn header_button(
     id: &'static str,
     icon: IconName,
     tooltip: &'static str,

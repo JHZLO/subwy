@@ -18,7 +18,7 @@ use gpui_kit::component::{
     },
     tooltip::Tooltip,
 };
-use gpui_kit::{assets::IconName, prelude::FluentBuilder as _, *};
+use gpui_kit::{TestSupportExt as _, assets::IconName, prelude::FluentBuilder as _, *};
 use subwy_project::{
     folders::Folders,
     fs::{self, FileStamp, LineEnding, MAX_HIGHLIGHT_BYTES, ReadError, TextFile},
@@ -29,11 +29,13 @@ use subwy_project::{
 
 use crate::{
     keymap::{
-        CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, ExtendSelection, IndentItem,
-        JoinLines, MARKDOWN, MoveLineDown, MoveLineUp, Newline, OutdentItem, SelectNextOccurrence,
-        ShrinkSelection, SortLines, ToggleBold, ToggleCase, ToggleItalic, ToggleTask,
+        CommentLines, DeleteIndent, DeleteLine, DuplicateLine, EDITOR, ExtendSelection, FocusTree,
+        IndentItem, JoinLines, MARKDOWN, MoveLineDown, MoveLineUp, Newline, OutdentItem,
+        SelectNextOccurrence, ShrinkSelection, SortLines, ToggleBold, ToggleCase, ToggleItalic,
+        ToggleTask,
     },
     preview::Preview,
+    project_panel,
     theme::{self, Palette, c, size, z},
 };
 
@@ -163,6 +165,8 @@ pub struct EditorTabs {
     occurrences: Option<Occurrences>,
     /// Alt+Up's run in one editor, for Alt+Down to go back through.
     extended: Option<Extended>,
+    /// Hidden, the tree is otherwise only Cmd+1 away: the tab bar leads with a button to show it.
+    pub tree_hidden: bool,
 }
 
 /// The selections Alt+Up grew from, and the one it made last: a run goes on only from that one.
@@ -317,6 +321,7 @@ impl EditorTabs {
             error: None,
             occurrences: None,
             extended: None,
+            tree_hidden: false,
         }
     }
 
@@ -2163,6 +2168,20 @@ impl EditorTabs {
             .border_b_1()
             .border_color(c(p.line))
             .text_size(z(12.5, cx))
+            .when(self.tree_hidden, |el| {
+                el.child(
+                    div().flex_none().flex().items_center().pl(z(8., cx)).child(
+                        project_panel::header_button(
+                            "tree-show",
+                            IconName::PanelLeftOpen,
+                            "Show Project",
+                            cx,
+                        )
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(FocusTree), cx))
+                        .test_support(),
+                    ),
+                )
+            })
             .child(
                 div()
                     .flex_1()

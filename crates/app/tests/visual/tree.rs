@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use gpui_kit::{
     AnyWindowHandle,
     component::{Theme, ThemeMode},
+    test::TestWindowExt as _,
 };
 
 use crate::check::{Check, fixture};
@@ -206,7 +207,7 @@ fn new_directory(check: &mut Check) {
 }
 
 /// The header's buttons: Expand All opens every folder but gitignored ones, Collapse All closes
-/// them, the minus hides the tree.
+/// them, the minus hides the tree, and the button it leaves in the tab bar shows it again.
 fn header(check: &mut Check) {
     let fixture = fixture();
     let window = open_light(check, fixture.path());
@@ -230,6 +231,30 @@ fn header(check: &mut Check) {
     click(check, window, button(0.), y);
     let hidden = check.workspace(window, |w, cx| w.tree_expanded(cx));
     check.expect_eq("the minus hides the tree", hidden, None);
+
+    let show = check
+        .cx
+        .update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            window
+                .try_find("tree-show")
+                .map(|button| button.bounds().center())
+        })
+        .expect("window");
+    check.shot(window, "tree-8-hidden");
+    check.expect_eq(
+        "a hidden tree leaves a button at the tab bar's left end",
+        show.is_some(),
+        true,
+    );
+    if let Some(at) = show {
+        check
+            .cx
+            .simulate_click(window, at, gpui_kit::Modifiers::default());
+        check.cx.run_until_parked();
+    }
+    let shown = check.workspace(window, |w, cx| w.tree_expanded(cx).is_some());
+    check.expect_eq("the button shows the tree again", shown, true);
 }
 
 /// Right-click on a row opens its menu; arrows and Enter pick a line as a click would.
