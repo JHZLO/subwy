@@ -96,6 +96,20 @@ pub fn run(check: &mut Check) {
         Some(PathBuf::from("docs/guide/keys.md")),
     );
 
+    // IntelliJ's double Shift opens it too.
+    shift_tap(check, window, None);
+    shift_tap(check, window, None);
+    let open = check.workspace(window, |w, _| w.finder_open());
+    check.expect_eq("double shift opens the finder", open, true);
+    check.keys(window, "escape");
+
+    // Shift held through a click (extending a selection) is no tap.
+    let editor = point(px(800.), px(300.));
+    shift_tap(check, window, Some(editor));
+    shift_tap(check, window, Some(editor));
+    let open = check.workspace(window, |w, _| w.finder_open());
+    check.expect_eq("two shift-clicks leave the finder shut", open, false);
+
     // On light paper and zoomed: every size scales.
     check
         .cx
@@ -106,4 +120,26 @@ pub fn run(check: &mut Check) {
     check
         .cx
         .update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+}
+
+/// Shift down and up with no other key, clicking at `click` while it is down.
+fn shift_tap(check: &mut Check, window: AnyWindowHandle, click: Option<Point<Pixels>>) {
+    let shift = Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    };
+    check.cx.simulate_event(
+        window,
+        ModifiersChangedEvent {
+            modifiers: shift,
+            ..ModifiersChangedEvent::default()
+        },
+    );
+    if let Some(at) = click {
+        check.cx.simulate_click(window, at, shift);
+    }
+    check
+        .cx
+        .simulate_event(window, ModifiersChangedEvent::default());
+    check.cx.run_until_parked();
 }

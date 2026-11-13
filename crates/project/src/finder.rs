@@ -1,7 +1,58 @@
 //! How the finder shows a result: the file's name, and the folders on the way to it written as
-//! the stations of a route, from the window's own folder. And the query that asks for a line.
+//! the stations of a route, from the window's own folder. And the query that asks for a line, and
+//! the double Shift that opens it.
 
-use std::ops::Range;
+use std::{
+    ops::Range,
+    time::{Duration, Instant},
+};
+
+/// How soon the second Shift has to follow the first.
+const DOUBLE_SHIFT: Duration = Duration::from_millis(400);
+
+/// IntelliJ's double Shift: Shift pressed and let go twice, alone. Shift held for a capital, a
+/// shortcut or a click is not a tap; GPUI's own `shift shift` binding counts a click's Shift too,
+/// so two Shift-clicks in the tree would open the finder.
+#[derive(Debug, Default)]
+pub struct DoubleShift {
+    /// Some modifier key is down.
+    held: bool,
+    /// Shift went down with nothing else held, and nothing has happened since.
+    pressed: bool,
+    /// When the last tap ended.
+    tapped: Option<Instant>,
+}
+
+impl DoubleShift {
+    /// The modifier keys are now `shift` and `others` (Cmd, Ctrl, Alt, Fn). True when this ends the
+    /// second tap.
+    pub fn modifiers(&mut self, shift: bool, others: bool, now: Instant) -> bool {
+        let from_nothing = !self.held;
+        self.held = shift || others;
+        if shift && !others {
+            // Shift left down after Cmd+Shift is not a press of its own.
+            self.pressed = from_nothing;
+            return false;
+        }
+        if !(std::mem::take(&mut self.pressed) && !self.held) {
+            self.tapped = None;
+            return false;
+        }
+        match self.tapped.take() {
+            Some(first) if now.duration_since(first) <= DOUBLE_SHIFT => true,
+            _ => {
+                self.tapped = Some(now);
+                false
+            }
+        }
+    }
+
+    /// A key or a click: Shift is held for it, not tapped.
+    pub fn other_input(&mut self) {
+        self.pressed = false;
+        self.tapped = None;
+    }
+}
 
 /// One result's text, with the query's matched characters as byte ranges into each part.
 #[derive(Debug, PartialEq, Eq)]
@@ -81,6 +132,51 @@ pub fn line_query(query: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Shift down and up at `at` milliseconds; true when it opens the finder.
+    fn tap(keys: &mut DoubleShift, start: Instant, at: u64) -> bool {
+        let now = start + Duration::from_millis(at);
+        keys.modifiers(true, false, now);
+        keys.modifiers(false, false, now)
+    }
+
+    #[test]
+    fn two_quick_lone_shifts_open_the_finder() {
+        let start = Instant::now();
+        let mut keys = DoubleShift::default();
+        assert!(!tap(&mut keys, start, 0));
+        assert!(tap(&mut keys, start, 200));
+        // A third tap starts over.
+        assert!(!tap(&mut keys, start, 300));
+
+        let mut keys = DoubleShift::default();
+        assert!(!tap(&mut keys, start, 0));
+        assert!(!tap(&mut keys, start, 900), "too slow");
+        assert!(
+            tap(&mut keys, start, 1000),
+            "the slow one counts as a first"
+        );
+    }
+
+    #[test]
+    fn shift_held_for_something_else_is_no_tap() {
+        let start = Instant::now();
+        let mut keys = DoubleShift::default();
+        assert!(!tap(&mut keys, start, 0));
+        // Shift+A types a capital, Shift+click selects; the Shift is not tapped.
+        keys.modifiers(true, false, start);
+        keys.other_input();
+        assert!(!keys.modifiers(false, false, start));
+        assert!(!tap(&mut keys, start, 100));
+
+        // Cmd+Shift, Cmd let go first: the Shift that stays is not a press.
+        let mut keys = DoubleShift::default();
+        assert!(!tap(&mut keys, start, 0));
+        keys.modifiers(false, true, start);
+        keys.modifiers(true, true, start);
+        keys.modifiers(true, false, start);
+        assert!(!keys.modifiers(false, false, start));
+    }
 
     #[test]
     fn folders_read_as_stations_from_the_window_folder() {

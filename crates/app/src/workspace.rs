@@ -8,6 +8,7 @@ use std::{
 
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use subwy_project::{
+    finder::DoubleShift,
     folders::Folders,
     network::{Network, Way},
     paths, session, watch,
@@ -94,6 +95,7 @@ pub struct Workspace {
     window: AnyWindowHandle,
     /// The active file the tree last moved to, so it follows only real switches.
     followed: Option<PathBuf>,
+    double_shift: DoubleShift,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -419,6 +421,7 @@ impl Workspace {
             recent_selected: 0,
             window: handle,
             followed: None,
+            double_shift: DoubleShift::default(),
             focus_handle,
             _subscriptions: subscriptions,
         }
@@ -1078,6 +1081,17 @@ impl Workspace {
         self.settings.is_some()
     }
 
+    /// Whether the file finder is open; for the UI checks.
+    pub fn finder_open(&self) -> bool {
+        matches!(
+            self.overlay,
+            Some(Overlay {
+                view: OverlayView::Finder(_),
+                ..
+            })
+        )
+    }
+
     /// Every tab's file, in tab order; for the UI checks.
     pub fn open_files(&self, cx: &App) -> Vec<PathBuf> {
         let (tabs, _) = self.tabs.read(cx).session_tabs(cx);
@@ -1310,13 +1324,7 @@ impl Workspace {
 
     /// Opens the finder over the window, or closes it and gives focus back.
     fn toggle_finder(&mut self, _: &ToggleFinder, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(
-            self.overlay,
-            Some(Overlay {
-                view: OverlayView::Finder(_),
-                ..
-            })
-        ) {
+        if self.finder_open() {
             self.close_overlay(true, window, cx);
             return;
         }
@@ -1754,6 +1762,25 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::focus_tree))
             .on_action(cx.listener(Self::focus_editor))
             .on_action(cx.listener(Self::toggle_finder))
+            // IntelliJ's double Shift (Search Everywhere) finds files, as Cmd+Shift+O does.
+            .on_modifiers_changed(
+                cx.listener(|this, event: &ModifiersChangedEvent, window, cx| {
+                    let keys = event.modifiers;
+                    let others = keys.control || keys.alt || keys.platform || keys.function;
+                    if this
+                        .double_shift
+                        .modifiers(keys.shift, others, Instant::now())
+                    {
+                        this.toggle_finder(&ToggleFinder, window, cx);
+                    }
+                }),
+            )
+            .capture_key_down(
+                cx.listener(|this, _: &KeyDownEvent, _, _| this.double_shift.other_input()),
+            )
+            .capture_any_mouse_down(
+                cx.listener(|this, _: &MouseDownEvent, _, _| this.double_shift.other_input()),
+            )
             .on_action(cx.listener(Self::go_to_line))
             .on_action(cx.listener(Self::toggle_search))
             .on_action(cx.listener(Self::toggle_terminal))

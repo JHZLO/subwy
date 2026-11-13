@@ -215,6 +215,8 @@ fn own_keys() -> Vec<Own> {
         own("space", PassThrough, panel),
         own("cmd-f", SpeedSearch, panel),
         own("escape", FocusEditor, panel),
+        // Shift twice opens it too, told apart in the workspace: GPUI's `shift shift` binding would
+        // also take two Shift-clicks.
         own("cmd-shift-o", ToggleFinder, ws),
         own("cmd-shift-f", ToggleSearch, ws),
         // gpui-kit binds cmd-shift-f to replace inside its editor ("Input"), which would win there; the
