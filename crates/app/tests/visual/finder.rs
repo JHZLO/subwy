@@ -10,11 +10,12 @@ use gpui_kit::{
 use crate::check::{Check, fixture};
 
 /// The center of the finder's result row `row` at 100% zoom, in a 1280-wide window: below the
-/// title bar (38), the gap (8), the border (1), the query (34), its line (1) and the list padding (4).
+/// title bar (38), the gap (8), the border (1), the line's band (3), the query (34), its line (1)
+/// and the list padding (4).
 fn row_center(row: usize) -> Point<Pixels> {
     point(
         px(640.),
-        px(38. + 8. + 1. + 34. + 1. + 4. + 44. * row as f32 + 22.),
+        px(38. + 8. + 1. + 3. + 34. + 1. + 4. + 44. * row as f32 + 22.),
     )
 }
 
@@ -101,7 +102,18 @@ pub fn run(check: &mut Check) {
     shift_tap(check, window, None);
     let open = check.workspace(window, |w, _| w.finder_open());
     check.expect_eq("double shift opens the finder", open, true);
-    check.keys(window, "escape");
+    check.shot(window, "finder-dimmed");
+
+    // The window behind is dimmed; a click on it, beside the finder, closes it.
+    let (_, height) = check.window_size(window);
+    check.cx.simulate_click(
+        window,
+        point(px(16.), px(height / 2.)),
+        Modifiers::default(),
+    );
+    check.cx.run_until_parked();
+    let open = check.workspace(window, |w, _| w.finder_open());
+    check.expect_eq("a click beside the finder closes it", open, false);
 
     // Shift held through a click (extending a selection) is no tap.
     let editor = point(px(800.), px(300.));

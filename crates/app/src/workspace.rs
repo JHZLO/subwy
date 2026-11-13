@@ -1966,9 +1966,17 @@ impl Render for Workspace {
                 },
                 cx,
             ))
-            .when_some(self.overlay.as_ref(), |el, overlay| match &overlay.view {
-                OverlayView::Finder(view) => el.child(finder::overlay(view.clone(), cx)),
-                OverlayView::Search(view) => el.child(search_panel::overlay(view.clone(), cx)),
+            .when_some(self.overlay.as_ref(), |el, overlay| {
+                // A click beside it closes it, as Escape does.
+                let close = cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                    this.close_overlay(true, window, cx)
+                });
+                match &overlay.view {
+                    OverlayView::Finder(view) => el.child(finder::overlay(view.clone(), close, cx)),
+                    OverlayView::Search(view) => {
+                        el.child(search_panel::overlay(view.clone(), close, cx))
+                    }
+                }
             })
             .when_some(self.settings.as_ref(), |el, dialog| {
                 // A click beside the dialog closes it.

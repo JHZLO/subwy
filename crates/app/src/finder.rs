@@ -12,7 +12,10 @@ use subwy_project::{
     index::{self, FileIndex},
 };
 
-use crate::theme::{self, Palette, c, size, z};
+use crate::{
+    modal,
+    theme::{self, Palette, c, size, z},
+};
 
 /// Sizes at 100% zoom.
 const WIDTH: f32 = 600.;
@@ -27,7 +30,6 @@ const ROW_GAP: f32 = 14.;
 const NAME_TEXT: f32 = 13.5;
 const SMALL_TEXT: f32 = 11.5;
 const TEXT_LINE: f32 = 17.;
-const RADIUS: f32 = 6.;
 
 /// The route drawn in front of each result, in its own box.
 const ROUTE_WIDTH: f32 = 74.;
@@ -321,15 +323,18 @@ fn ring_positions(stops: usize) -> Vec<f32> {
     }
 }
 
-/// The finder placed at the top center of the window, over the tabs.
-pub fn overlay(finder: Entity<Finder>, cx: &App) -> impl IntoElement {
-    div()
-        .absolute()
-        .top(z(size::TITLE_BAR + TOP_GAP, cx))
-        .left_0()
-        .right_0()
+/// The finder at the top center of the dimmed window, over the tabs. A click beside it runs
+/// `on_outside`.
+pub fn overlay(
+    finder: Entity<Finder>,
+    on_outside: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    modal::backdrop(on_outside, cx)
         .flex()
         .justify_center()
+        .items_start()
+        .pt(z(size::TITLE_BAR + TOP_GAP, cx))
         .child(finder)
 }
 
@@ -364,22 +369,15 @@ impl Render for Finder {
             .line_height(z(INPUT_LINE, cx));
         // Input's own `h` sizes only multi-line inputs; the style's height sizes a single line.
         let input = Styled::h(input, z(INPUT_HEIGHT, cx));
-        div()
+        modal::sheet(modal::FINDER_LINE, cx)
             .id("finder")
-            // Clicks inside stay here: the window behind would otherwise take focus and close it.
+            // Clicks inside stay here: the dimmed window behind would close it.
             .occlude()
             .on_action(cx.listener(|this, _: &MoveUp, _, cx| this.move_selection(-1, cx)))
             .on_action(cx.listener(|this, _: &MoveDown, _, cx| this.move_selection(1, cx)))
             .on_action(cx.listener(|this, _: &Enter, _, cx| this.open(this.selected, cx)))
             .on_action(cx.listener(|_, _: &Escape, _, cx| cx.emit(FinderEvent::Dismiss)))
             .w(z(WIDTH, cx))
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .bg(c(p.paper))
-            .border_1()
-            .border_color(c(p.line))
-            .rounded(z(RADIUS, cx))
             .text_size(z(size::UI_TEXT, cx))
             .text_color(c(p.ink))
             .child(

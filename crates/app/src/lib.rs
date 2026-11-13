@@ -11,6 +11,7 @@ pub mod icons;
 pub mod keymap;
 mod keymap_view;
 mod menus;
+mod modal;
 mod preview;
 mod project_panel;
 mod route;

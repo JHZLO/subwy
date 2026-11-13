@@ -19,7 +19,10 @@ use subwy_project::{
     search::{self, Results},
 };
 
-use crate::theme::{self, c, size, z};
+use crate::{
+    modal,
+    theme::{self, c, size, z},
+};
 
 /// Sizes at 100% zoom; the finder's, wider for lines of text.
 const WIDTH: f32 = 720.;
@@ -34,7 +37,6 @@ const SMALL_TEXT: f32 = 12.;
 /// Wide enough for a five-digit line number at 12 px.
 const NUMBER_WIDTH: f32 = 36.;
 const NUMBER_GAP: f32 = 8.;
-const RADIUS: f32 = 6.;
 /// Room kept free below the panel when the window is short or zoomed in.
 const BOTTOM_GAP: f32 = 24.;
 
@@ -369,15 +371,18 @@ fn thousands(count: usize) -> String {
     out
 }
 
-/// Places the panel at the top center of the window, over the tabs, like the finder.
-pub fn overlay(panel: Entity<SearchPanel>, cx: &App) -> impl IntoElement {
-    div()
-        .absolute()
-        .top(z(size::TITLE_BAR + TOP_GAP, cx))
-        .left_0()
-        .right_0()
+/// Places the panel at the top center of the dimmed window, over the tabs, like the finder. A
+/// click beside it runs `on_outside`.
+pub fn overlay(
+    panel: Entity<SearchPanel>,
+    on_outside: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
+    modal::backdrop(on_outside, cx)
         .flex()
         .justify_center()
+        .items_start()
+        .pt(z(size::TITLE_BAR + TOP_GAP, cx))
         .child(panel)
 }
 
@@ -388,7 +393,7 @@ impl Render for SearchPanel {
         let summary = self.summary();
         // As many rows as fit above the window's bottom edge, at most MAX_ROWS.
         let room = window.viewport_size().height.as_f32() / zoom
-            - (size::TITLE_BAR + TOP_GAP + INPUT_HEIGHT + 2. * ROW_HEIGHT)
+            - (size::TITLE_BAR + TOP_GAP + modal::BAND + INPUT_HEIGHT + 2. * ROW_HEIGHT)
             - 2. * LIST_PADDING_Y
             - BOTTOM_GAP;
         let fit = (room / ROW_HEIGHT).max(1.) as usize;
@@ -400,22 +405,15 @@ impl Render for SearchPanel {
             .line_height(z(INPUT_LINE, cx));
         // Input's own `h` sizes only multi-line inputs; the style's height sizes a single line.
         let input = Styled::h(input, z(INPUT_HEIGHT, cx));
-        div()
+        modal::sheet(modal::SEARCH_LINE, cx)
             .id("search")
-            // Clicks inside stay here: the window behind would otherwise take focus and close it.
+            // Clicks inside stay here: the dimmed window behind would close it.
             .occlude()
             .on_action(cx.listener(|this, _: &MoveUp, _, cx| this.move_selection(false, cx)))
             .on_action(cx.listener(|this, _: &MoveDown, _, cx| this.move_selection(true, cx)))
             .on_action(cx.listener(|this, _: &Enter, _, cx| this.open(this.selected, cx)))
             .on_action(cx.listener(|_, _: &Escape, _, cx| cx.emit(SearchEvent::Dismiss)))
             .w(z(WIDTH, cx))
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .bg(c(p.paper))
-            .border_1()
-            .border_color(c(p.line))
-            .rounded(z(RADIUS, cx))
             .text_size(z(size::UI_TEXT, cx))
             .text_color(c(p.ink))
             .child(

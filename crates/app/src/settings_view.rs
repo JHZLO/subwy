@@ -18,7 +18,7 @@ use subwy_project::settings::{Appearance, Settings, SoftWrap};
 use crate::{
     keymap::{CloseSettings, SETTINGS},
     keymap_view::KeymapView,
-    settings, theme,
+    modal, settings, theme,
     theme::{c, z},
     update_settings,
 };
@@ -53,35 +53,21 @@ pub fn dialog(
     window: &Window,
     cx: &App,
 ) -> impl IntoElement {
-    let p = theme::colors(cx);
     let zoom = theme::zoom(cx);
     let viewport = window.viewport_size();
     let width = (DIALOG_WIDTH * zoom).min(viewport.width.as_f32() - 2. * DIALOG_MARGIN);
     let height = (DIALOG_HEIGHT * zoom).min(viewport.height.as_f32() - 2. * DIALOG_MARGIN);
-    let dark = p.paper == theme::DARK.paper;
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full()
-        .occlude()
+    modal::backdrop(on_outside, cx)
         .flex()
         .items_center()
         .justify_center()
-        .bg(hsla(0., 0., 0., if dark { 0.5 } else { 0.25 }))
-        .on_mouse_down(MouseButton::Left, on_outside)
         .child(
-            div()
+            modal::sheet(modal::SETTINGS_LINE, cx)
                 .w(px(width.max(320.)))
                 .h(px(height.max(240.)))
-                .rounded(z(8., cx))
-                .border_1()
-                .border_color(c(p.line))
-                .bg(c(p.paper))
-                .overflow_hidden()
                 // A click on the sheet stays there.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(view),
+                .child(div().flex_1().min_h_0().child(view)),
         )
 }
 
