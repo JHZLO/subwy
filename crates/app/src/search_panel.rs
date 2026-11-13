@@ -19,7 +19,7 @@ use gpui_kit::component::{
         RopeExt as _,
     },
 };
-use gpui_kit::{prelude::FluentBuilder as _, *};
+use gpui_kit::{assets::IconName, prelude::FluentBuilder as _, *};
 use subwy_project::{
     folders::Folders,
     fs,
@@ -40,15 +40,17 @@ const TOP_GAP: f32 = 8.;
 /// Room kept free beside and below the panel.
 const SIDE_GAP: f32 = 24.;
 const BOTTOM_GAP: f32 = 24.;
-const HEADER_HEIGHT: f32 = 34.;
-const INPUT_HEIGHT: f32 = 34.;
 const INPUT_LINE: f32 = 20.;
-const ROW_HEIGHT: f32 = 24.;
+/// A match is a station on the line that comes down from the sign.
+const ROW_HEIGHT: f32 = 30.;
+const STATION_COLUMN: f32 = 2. * (modal::BEND_X - 12.);
+const STATION: f32 = 9.;
+const STOP: f32 = 14.;
 const PATH_HEIGHT: f32 = 28.;
 const PADDING_X: f32 = 12.;
-const LIST_PADDING_Y: f32 = 4.;
+const LIST_PADDING_BOTTOM: f32 = 8.;
 const SMALL_TEXT: f32 = 12.;
-const GAP: f32 = 8.;
+const GAP: f32 = 12.;
 /// The preview keeps at least this much when the window is short.
 const PREVIEW_MIN: f32 = 120.;
 
@@ -357,7 +359,8 @@ impl SearchPanel {
         })
     }
 
-    /// A match's line, then on the right its file and line number, as IntelliJ lists them.
+    /// A match: a station on the line, then the match's line and on the right its file and line
+    /// number, as IntelliJ lists them. The selected one is a stop, as the tree's selection is.
     fn render_row(&self, row: usize, cx: &mut Context<Self>) -> AnyElement {
         let p = theme::colors(cx);
         let (Some(results), Some(&(f, l))) = (&self.results, self.rows.get(row)) else {
@@ -367,45 +370,85 @@ impl SearchPanel {
         let line = &file.lines[l];
         let selected = row == self.selected;
         let ink = c(if selected { p.sel_ink } else { p.ink });
+        let color = c(p.route[modal::SEARCH_LINE]);
+        let station = match selected {
+            true => div()
+                .size(z(STOP, cx))
+                .rounded_full()
+                .bg(color)
+                .shadow(vec![BoxShadow {
+                    color: color.opacity(0.22),
+                    offset: point(px(0.), px(0.)),
+                    blur_radius: px(0.),
+                    spread_radius: z(5., cx),
+                    inset: false,
+                }]),
+            false => div()
+                .size(z(STATION, cx))
+                .rounded_full()
+                .bg(c(p.paper))
+                .border(z(2., cx))
+                .border_color(color),
+        };
         div()
             .id(("search-row", row))
             .w_full()
             .h(z(ROW_HEIGHT, cx))
-            .px(z(PADDING_X, cx))
+            .pl(z(PADDING_X, cx))
+            .pr(z(PADDING_X - 4., cx))
             .flex()
             .items_center()
-            .gap(z(GAP, cx))
             .whitespace_nowrap()
-            .overflow_hidden()
-            .when(selected, |el| el.bg(c(p.sel_bg)))
-            .when(!selected, |el| el.hover(|style| style.bg(c(p.hover))))
             .on_click(cx.listener(move |this, _, _, cx| this.open(row, cx)))
+            .child(
+                div()
+                    .flex_none()
+                    .w(z(STATION_COLUMN, cx))
+                    .flex()
+                    .justify_center()
+                    .child(station),
+            )
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .gap(z(GAP, cx))
+                    .pl(z(10., cx))
+                    .pr(z(PADDING_X, cx))
                     .overflow_hidden()
-                    .text_ellipsis()
-                    .text_color(ink)
-                    .child(matched_text(&line.text, &line.ranges)),
-            )
-            .child(
-                // A long path loses its start, keeping the folders nearest the file.
-                div()
-                    .flex_none()
-                    .max_w(relative(0.45))
-                    .overflow_hidden()
-                    .text_ellipsis_start()
-                    .text_size(z(SMALL_TEXT, cx))
-                    .text_color(if selected { ink } else { c(p.sub) })
-                    .child(file.path.clone()),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(z(SMALL_TEXT, cx))
-                    .text_color(if selected { ink } else { c(p.num) })
-                    .child((line.line + 1).to_string()),
+                    .rounded(z(6., cx))
+                    .when(selected, |el| el.bg(c(p.sel_bg)))
+                    .when(!selected, |el| el.hover(|style| style.bg(c(p.hover))))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .text_color(ink)
+                            .child(matched_text(&line.text, &line.ranges, color)),
+                    )
+                    .child(
+                        // A long path loses its start, keeping the folders nearest the file.
+                        div()
+                            .flex_none()
+                            .max_w(relative(0.45))
+                            .overflow_hidden()
+                            .text_ellipsis_start()
+                            .text_size(z(SMALL_TEXT, cx))
+                            .text_color(if selected { ink } else { c(p.sub) })
+                            .child(file.path.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(z(SMALL_TEXT, cx))
+                            .text_color(if selected { ink } else { c(p.num) })
+                            .child((line.line + 1).to_string()),
+                    ),
             )
             .into_any_element()
     }
@@ -432,11 +475,12 @@ fn reveal(editor: &Entity<EditorState>, line: u32, matched: &str, cx: &mut App) 
     });
 }
 
-/// The line with its matches in semibold: medium barely shows at 13 px, and green is for the
-/// subwy devices only.
-fn matched_text(text: &str, ranges: &[Range<usize>]) -> StyledText {
+/// The line with its matches in semibold on a tint of the search's line: medium barely shows at
+/// 13 px, and green is for the subwy devices only.
+fn matched_text(text: &str, ranges: &[Range<usize>], line: Hsla) -> StyledText {
     let matched = HighlightStyle {
         font_weight: Some(FontWeight::SEMIBOLD),
+        background_color: Some(line.opacity(0.24)),
         ..Default::default()
     };
     StyledText::new(text.to_string())
@@ -489,19 +533,23 @@ impl Render for SearchPanel {
         // With matches the panel reaches down the window, the preview taking what the list leaves.
         let height = viewport.height.as_f32() / zoom - size::TITLE_BAR - TOP_GAP - BOTTOM_GAP;
         let room = height
-            - (modal::BAND + HEADER_HEIGHT + INPUT_HEIGHT + 2. + 2. * LIST_PADDING_Y)
-            - (PATH_HEIGHT + 1. + PREVIEW_MIN);
+            - (modal::SIGN_HEIGHT + modal::FIELD_SECTION + LIST_PADDING_BOTTOM)
+            - (PATH_HEIGHT + 1. + PREVIEW_MIN)
+            - (size::KEY_HINTS + 1.);
         let fit = (room / ROW_HEIGHT).max(1.) as usize;
         let shown = self.rows.len().min(LIST_ROWS).min(fit);
         let selected = self.selected_match().map(|(path, ..)| path);
+        // The line comes down from the sign to the last station in view.
+        let last_stop =
+            modal::SIGN_HEIGHT + modal::FIELD_SECTION + ROW_HEIGHT * (shown as f32 - 0.5);
         let input = Input::new(&self.input)
             .appearance(false)
-            .px(z(PADDING_X, cx))
+            .pr(z(PADDING_X, cx))
             .text_size(z(size::UI_TEXT, cx))
             .line_height(z(INPUT_LINE, cx));
         // Input's own `h` sizes only multi-line inputs; the style's height sizes a single line.
-        let input = Styled::h(input, z(INPUT_HEIGHT, cx));
-        modal::sheet(modal::SEARCH_LINE, cx)
+        let input = Styled::h(input, z(INPUT_LINE + 4., cx));
+        modal::sheet(cx)
             .id("search")
             // Clicks inside stay here: the dimmed window behind would close it.
             .occlude()
@@ -514,57 +562,41 @@ impl Render for SearchPanel {
             .on_action(cx.listener(|this, _: &Enter, _, cx| this.open(this.selected, cx)))
             .on_action(cx.listener(|_, _: &Escape, _, cx| cx.emit(SearchEvent::Dismiss)))
             .w(px(width.max(320.)))
-            .when(shown > 0, |el| el.h(z(height, cx)))
+            .when(shown > 0, |el| {
+                el.h(z(height, cx))
+                    .child(modal::bend(modal::SEARCH_LINE, last_stop, cx))
+            })
             .text_size(z(size::UI_TEXT, cx))
             .text_color(c(p.ink))
             .child(
-                div()
-                    .flex_none()
-                    .h(z(HEADER_HEIGHT, cx))
-                    .px(z(PADDING_X, cx))
-                    .flex()
-                    .items_center()
-                    .gap(z(GAP + 4., cx))
-                    .whitespace_nowrap()
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Find in Files"),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .text_ellipsis()
-                            .text_size(z(SMALL_TEXT, cx))
-                            .text_color(c(p.sub))
-                            .children(self.summary()),
-                    )
-                    // The folder searched stays in sight once the query hides the placeholder.
-                    .children(self.scope.clone().map(|scope| {
-                        div()
-                            .flex_none()
-                            .max_w(z(WIDTH / 3., cx))
-                            .overflow_hidden()
-                            .text_ellipsis_start()
-                            .text_size(z(SMALL_TEXT, cx))
-                            .text_color(c(p.sub))
-                            .child(format!("in {scope}"))
-                    })),
+                modal::sign(
+                    modal::SEARCH_LINE,
+                    IconName::Search,
+                    "Find in Files",
+                    shown == 0,
+                    cx,
+                )
+                .children(self.summary().map(|summary| modal::note(summary, cx)))
+                // The folder searched stays in sight once the query hides the placeholder.
+                .children(
+                    self.scope
+                        .clone()
+                        .map(|scope| modal::note(format!("in {scope}"), cx)),
+                ),
             )
             .child(
                 div()
                     .flex_none()
-                    .border_t_1()
-                    .border_color(c(p.line))
-                    .when(shown > 0, |el| el.border_b_1())
-                    .child(input),
+                    .pt(z(2., cx))
+                    .pb(z(12., cx))
+                    // Beside the line coming down, or the whole width with no list to reach.
+                    .pl(z(if shown > 0 { 2. * modal::BEND_X } else { 16. }, cx))
+                    .pr(z(16., cx))
+                    .child(modal::field(modal::SEARCH_LINE, input, cx)),
             )
             .when(shown > 0, |el| {
                 el.child(
-                    div().flex_none().py(z(LIST_PADDING_Y, cx)).child(
+                    div().flex_none().pb(z(LIST_PADDING_BOTTOM, cx)).child(
                         uniform_list(
                             "search-rows",
                             self.rows.len(),
@@ -582,6 +614,7 @@ impl Render for SearchPanel {
                     div()
                         .flex_1()
                         .min_h_0()
+                        .bg(c(p.side))
                         .border_t_1()
                         .border_color(c(p.line))
                         .children(self.preview.as_ref().map(|(_, editor)| {
@@ -593,6 +626,10 @@ impl Render for SearchPanel {
                                 .text_size(z(theme::editor_text(cx), cx))
                         })),
                 )
+                .child(crate::project_panel::key_hints(
+                    &[("↑↓", "Choose"), ("↩", "Get off here"), ("Esc", "Stay")],
+                    cx,
+                ))
             })
     }
 }

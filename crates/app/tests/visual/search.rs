@@ -10,12 +10,12 @@ use gpui_kit::{
 use crate::check::{Check, fixture};
 
 /// The center of the panel's list row `row` at 100% zoom, in a 1280-wide window: below the title
-/// bar (38), the gap (8), the border (1), the line's band (3), the header (34), the query between
-/// its lines (1 + 34 + 1) and the list's padding (4).
+/// bar (38), the gap (8), the border (1), the sign (58) and the query's field with the room around
+/// it (54); rows are 30 high.
 fn row_center(row: usize) -> Point<Pixels> {
     point(
         px(640.),
-        px(38. + 8. + 1. + 3. + 34. + 1. + 34. + 1. + 4. + 24. * row as f32 + 12.),
+        px(38. + 8. + 1. + 58. + 54. + 30. * row as f32 + 15.),
     )
 }
 

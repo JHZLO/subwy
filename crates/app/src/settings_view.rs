@@ -43,7 +43,6 @@ impl EventEmitter<CloseSettings> for SettingsView {}
 const DIALOG_WIDTH: f32 = 960.;
 const DIALOG_HEIGHT: f32 = 680.;
 const DIALOG_MARGIN: f32 = 32.;
-const DIALOG_HEADER: f32 = 40.;
 
 /// The Settings dialog over the window: the window dimmed behind, the settings on a sheet of paper
 /// in the middle. `on_outside` runs for a click beside the sheet.
@@ -62,7 +61,7 @@ pub fn dialog(
         .items_center()
         .justify_center()
         .child(
-            modal::sheet(modal::SETTINGS_LINE, cx)
+            modal::sheet(cx)
                 .w(px(width.max(320.)))
                 .h(px(height.max(240.)))
                 // A click on the sheet stays there.
@@ -410,36 +409,28 @@ impl Render for SettingsView {
             .bg(c(p.paper))
             .text_size(z(theme::size::UI_TEXT, cx))
             .child(
-                div()
-                    .h(z(DIALOG_HEADER, cx))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px(z(16., cx))
-                    .border_b_1()
-                    .border_color(c(p.line))
-                    .child(
-                        div()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(c(p.ink))
-                            .child("Settings"),
-                    )
-                    .child(
-                        div()
-                            .id("settings-close")
-                            .size(z(22., cx))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(z(4., cx))
-                            .text_color(c(p.sub))
-                            .hover(|style| style.bg(c(p.hover)).text_color(c(p.ink)))
-                            .child(Icon::new(IconName::X).size(z(14., cx)))
-                            .on_click(
-                                cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(CloseSettings)),
-                            ),
-                    ),
+                modal::sign(
+                    modal::SETTINGS_LINE,
+                    IconName::Settings,
+                    "Settings",
+                    true,
+                    cx,
+                )
+                .child(
+                    div()
+                        .id("settings-close")
+                        .size(z(22., cx))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(z(4., cx))
+                        // It sits on the sign's line, as the name box does.
+                        .bg(c(p.paper))
+                        .text_color(c(p.sub))
+                        .hover(|style| style.bg(c(p.hover)).text_color(c(p.ink)))
+                        .child(Icon::new(IconName::X).size(z(14., cx)))
+                        .on_click(cx.listener(|_, _: &ClickEvent, _, cx| cx.emit(CloseSettings))),
+                ),
             )
             .child(
                 div()

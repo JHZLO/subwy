@@ -105,8 +105,7 @@ pub fn run(check: &mut Check) {
 }
 
 /// Where the dialog's settings page starts: the dialog is 960 by 680 (less in a window too small
-/// for that and its 32 margin) in the middle, under its line's band (3) and 40 high title line,
-/// inside its border.
+/// for that and its 32 margin) in the middle, under its 58 high sign, inside its border.
 fn page(check: &mut Check, window: AnyWindowHandle) -> (f32, f32) {
     let (width, height) = check.window_size(window);
     let dialog = (
@@ -115,7 +114,7 @@ fn page(check: &mut Check, window: AnyWindowHandle) -> (f32, f32) {
     );
     (
         (width - dialog.0) / 2. + 1.,
-        (height - dialog.1) / 2. + 1. + 3. + 40.,
+        (height - dialog.1) / 2. + 1. + 58.,
     )
 }
 

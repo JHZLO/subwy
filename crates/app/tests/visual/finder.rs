@@ -10,12 +10,12 @@ use gpui_kit::{
 use crate::check::{Check, fixture};
 
 /// The center of the finder's result row `row` at 100% zoom, in a 1280-wide window: below the
-/// title bar (38), the gap (8), the border (1), the line's band (3), the query (34), its line (1)
-/// and the list padding (4).
+/// title bar (38), the gap (8), the border (1), the sign (58), the query's field with the room
+/// around it (54), its line (1) and the list padding (4).
 fn row_center(row: usize) -> Point<Pixels> {
     point(
         px(640.),
-        px(38. + 8. + 1. + 3. + 34. + 1. + 4. + 44. * row as f32 + 22.),
+        px(38. + 8. + 1. + 58. + 54. + 1. + 4. + 44. * row as f32 + 22.),
     )
 }
 

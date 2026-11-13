@@ -4,7 +4,7 @@
 use std::{ops::Range, path::PathBuf, sync::Arc};
 
 use gpui_kit::component::input::{Enter, Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
-use gpui_kit::{prelude::FluentBuilder as _, *};
+use gpui_kit::{assets::IconName, prelude::FluentBuilder as _, *};
 use subwy_project::{
     finder::{self, Route},
     folders::Folders,
@@ -21,7 +21,6 @@ use crate::{
 const WIDTH: f32 = 600.;
 /// Below the title bar, over the top of the tab bar.
 const TOP_GAP: f32 = 8.;
-const INPUT_HEIGHT: f32 = 34.;
 const INPUT_LINE: f32 = 20.;
 const ROW_HEIGHT: f32 = 44.;
 const PADDING_X: f32 = 14.;
@@ -364,12 +363,16 @@ impl Render for Finder {
         };
         let input = Input::new(&self.input)
             .appearance(false)
-            .px(z(PADDING_X, cx))
+            .pr(z(PADDING_X, cx))
             .text_size(z(size::UI_TEXT, cx))
             .line_height(z(INPUT_LINE, cx));
         // Input's own `h` sizes only multi-line inputs; the style's height sizes a single line.
-        let input = Styled::h(input, z(INPUT_HEIGHT, cx));
-        modal::sheet(modal::FINDER_LINE, cx)
+        let input = Styled::h(input, z(INPUT_LINE + 4., cx));
+        let title = match wants_line {
+            true => "Go to Line",
+            false => "Go to File",
+        };
+        modal::sheet(cx)
             .id("finder")
             // Clicks inside stay here: the dimmed window behind would close it.
             .occlude()
@@ -381,23 +384,21 @@ impl Render for Finder {
             .text_size(z(size::UI_TEXT, cx))
             .text_color(c(p.ink))
             .child(
+                modal::sign(modal::FINDER_LINE, IconName::File, title, true, cx)
+                    .when(self.index.is_some() || wants_line, |el| {
+                        el.child(modal::note(stations, cx))
+                    }),
+            )
+            .child(
                 div()
-                    .flex()
-                    .items_center()
+                    .flex_none()
+                    .pt(z(2., cx))
+                    .pb(z(12., cx))
+                    .px(z(16., cx))
                     .when(!rows.is_empty(), |el| {
                         el.border_b_1().border_color(c(p.line))
                     })
-                    .child(div().flex_1().min_w_0().child(input))
-                    .when(self.index.is_some() || wants_line, |el| {
-                        el.child(
-                            div()
-                                .flex_none()
-                                .pr(z(PADDING_X, cx))
-                                .text_size(z(SMALL_TEXT, cx))
-                                .text_color(c(p.sub))
-                                .child(stations),
-                        )
-                    }),
+                    .child(modal::field(modal::FINDER_LINE, input, cx)),
             )
             .when(!rows.is_empty(), |el| {
                 el.child(div().py(z(LIST_PADDING_Y, cx)).children(rows))
