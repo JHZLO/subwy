@@ -10,12 +10,12 @@ use gpui_kit::{
 use crate::check::{Check, fixture};
 
 /// The center of the panel's list row `row` at 100% zoom, in a 1280-wide window: below the title
-/// bar (38), the gap (8), the border (1), the line's band (3), the query (34), its line (1) and the
-/// count line (24).
+/// bar (38), the gap (8), the border (1), the line's band (3), the header (34), the query between
+/// its lines (1 + 34 + 1) and the list's padding (4).
 fn row_center(row: usize) -> Point<Pixels> {
     point(
         px(640.),
-        px(38. + 8. + 1. + 3. + 34. + 1. + 24. + 24. * row as f32 + 12.),
+        px(38. + 8. + 1. + 3. + 34. + 1. + 34. + 1. + 4. + 24. * row as f32 + 12.),
     )
 }
 
@@ -76,7 +76,17 @@ pub fn run(check: &mut Check) {
     // README.md line 1, main.rs lines 3 and 6. Enter opens the first, the cursor on its line.
     find(check, window, "leaf");
     check.shot(window, "search-results");
-    check.keys(window, "enter");
+    // Under the list, the selected match's file with the match selected.
+    let previewed = |check: &mut Check| check.workspace(window, |w, cx| w.search_preview(cx));
+    let first = Some(("docs/guide/paths.md".to_string(), "leaf".to_string()));
+    let shown = check.wait_until(|check| previewed(check) == first);
+    check.expect_eq("the preview shows the first match", shown, true);
+    check.keys(window, "down down");
+    let later = Some(("src/main.rs".to_string(), "leaf".to_string()));
+    let shown = check.wait_until(|check| previewed(check) == later);
+    check.shot(window, "search-preview");
+    check.expect_eq("the preview follows the selection", shown, true);
+    check.keys(window, "up up enter");
     let active = check.workspace(window, |w, cx| w.active_file(cx));
     check.expect_eq(
         "enter opens the first match's file",
@@ -90,7 +100,7 @@ pub fn run(check: &mut Check) {
         "docs/guide/paths.md:3",
     );
 
-    // Down steps over the file rows to the next line and stops at the last; Up goes back.
+    // Down steps to the next match and stops at the last; Up goes back.
     find(check, window, "leaf");
     check.keys(window, "down down down down enter");
     expect_reference(
@@ -131,11 +141,11 @@ pub fn run(check: &mut Check) {
         "docs/guide/paths.md:8",
     );
 
-    // A click on a line opens it: README.md's, below its path.
+    // A click on a line opens it: README.md's, the second.
     find(check, window, "leaf");
     check
         .cx
-        .simulate_click(window, row_center(3), Modifiers::default());
+        .simulate_click(window, row_center(1), Modifiers::default());
     expect_reference(
         check,
         window,

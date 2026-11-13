@@ -1076,6 +1076,14 @@ impl Workspace {
         }
     }
 
+    /// The folder search's preview: its file and the text it has selected; for the UI checks.
+    pub fn search_preview(&self, cx: &App) -> Option<(String, String)> {
+        match &self.overlay.as_ref()?.view {
+            OverlayView::Search(view) => view.read(cx).preview(cx),
+            OverlayView::Finder(_) => None,
+        }
+    }
+
     /// Whether the Settings dialog is open; for the UI checks.
     pub fn settings_open(&self) -> bool {
         self.settings.is_some()

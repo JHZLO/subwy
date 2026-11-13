@@ -228,7 +228,7 @@ fn tab_size(settings: &subwy_project::settings::Settings) -> TabSize {
 }
 
 /// A tab's language: its file's, or plain text past the size highlighting stops at.
-fn tab_language(path: &Path, text: &str, len: u64) -> SharedString {
+pub(crate) fn tab_language(path: &Path, text: &str, len: u64) -> SharedString {
     match len > MAX_HIGHLIGHT_BYTES {
         true => "text".into(),
         false => language_for(path, text),
