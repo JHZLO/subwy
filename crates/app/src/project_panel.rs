@@ -905,7 +905,7 @@ impl ProjectPanel {
             return None;
         }
         let offset = self.scroll.0.borrow().base_handle.offset();
-        let row = z(size::TREE_ROW, cx);
+        let row = row_height(&self.scroll, lines.len(), cx);
         let line = ((position.y - bounds.top() - offset.y) / row).floor();
         if line < 0. {
             return None;
@@ -2236,6 +2236,17 @@ fn list(folders: &Folders, dir: &Path) -> std::io::Result<Vec<subwy_project::fs:
     }
 }
 
+/// The height the list gives each of its `count` rows. Zoomed, a row is rounded to the screen's
+/// pixels (24.2 at 110% is laid out as 24), so the zoomed height drifts from the rows down a long
+/// tree. The zoomed height before the list has been laid out.
+fn row_height(scroll: &UniformListScrollHandle, count: usize, cx: &App) -> Pixels {
+    let laid_out = scroll.0.borrow().last_item_size;
+    match laid_out {
+        Some(item) if count > 0 => item.contents.height / count as f32,
+        _ => z(size::TREE_ROW, cx),
+    }
+}
+
 /// The header's icon buttons: square, the icon in `sub`, a hover fill, a tooltip.
 const HEADER_BUTTON: f32 = 22.;
 
@@ -2691,7 +2702,7 @@ impl Render for ProjectPanel {
                     let offset = scroll.0.borrow().base_handle.offset();
                     let look = route::Look {
                         origin: point(bounds.left(), bounds.top() + offset.y),
-                        row: z(size::TREE_ROW, cx),
+                        row: row_height(&scroll, count, cx),
                         column: z(column_x(0), cx),
                         indent: z(size::TREE_INDENT, cx),
                         right: bounds.right() - z(ROW_PADDING_RIGHT, cx),
@@ -2703,7 +2714,8 @@ impl Render for ProjectPanel {
                         selection: c(if focused { p.tree_sel } else { p.cur }),
                         hover: c(p.hover),
                     };
-                    route::paint_marked(window, bounds, &look, &marked);
+                    let lead = shape.station.map(|(depth, _)| depth);
+                    route::paint_marked(window, bounds, &look, &marked, lead);
                     route::paint(window, bounds, &look, &shape, ping, &stops, &hovered);
                 },
             )

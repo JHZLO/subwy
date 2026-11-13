@@ -334,6 +334,20 @@ fn several(check: &mut Check) {
         Some("docs/guide\ndocs/notes.md\nREADME.md".into()),
     );
     check.shot(window, "tree-10-several");
+    // Besides the lead (README.md, under the folder: the first line's station), each selected row
+    // carries a bar of that line left of its chevron, which a hovered row lacks.
+    let bar = pixels_of(
+        check,
+        window,
+        subwy::theme::LIGHT.route[0],
+        (30., row_y(2) - 4.),
+        (58., row_y(2) + 4.),
+    );
+    check.expect_eq(
+        "the other selected rows carry the lead's line",
+        bar > 0,
+        true,
+    );
     let shift = gpui_kit::Modifiers {
         shift: true,
         ..Default::default()
@@ -853,4 +867,26 @@ fn rename(check: &mut Check) {
         names,
         (true, Some("target/\n".into())),
     );
+}
+
+/// How many pixels of `color` the window shows between the corners `from` and `to`, in points.
+fn pixels_of(
+    check: &mut Check,
+    window: AnyWindowHandle,
+    color: u32,
+    from: (f32, f32),
+    to: (f32, f32),
+) -> usize {
+    let (width, _) = check.window_size(window);
+    let shot = check.cx.capture_screenshot(window).expect("screenshot");
+    let scale = shot.width() as f32 / width;
+    let rgb = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
+    shot.enumerate_pixels()
+        .filter(|(x, y, pixel)| {
+            let (x, y) = (*x as f32 / scale, *y as f32 / scale);
+            (from.0..to.0).contains(&x)
+                && (from.1..to.1).contains(&y)
+                && (0..3).all(|i| pixel[i].abs_diff(rgb[i]) <= 12)
+        })
+        .count()
 }

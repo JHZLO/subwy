@@ -282,22 +282,38 @@ pub fn paint(
     });
 }
 
-/// A row's background, from just left of its chevron to the right end, with soft corners.
-/// The selection's background on the other selected rows, given as (depth, line). No route runs to
-/// them: the route belongs to the lead.
+/// The selection's background on the other selected rows, given as (depth, line), each with a bar
+/// of the lead's line at its left end, which the hovered row's background lacks. No route runs to
+/// them: the route belongs to the lead, whose station sits at depth `lead`.
 pub fn paint_marked(
     window: &mut Window,
     bounds: Bounds<Pixels>,
     look: &Look,
     marked: &[(usize, usize)],
+    lead: Option<f32>,
 ) {
     window.with_content_mask(Some(ContentMask { bounds }), |window| {
         for &(depth, row) in marked {
             band(window, look, depth as f32, row as f32, look.selection);
+            // The color of the lead's station; without the lead in view, the row's own line.
+            let reach = lead.map_or(depth, |lead| lead.round() as usize);
+            let left = look.x(depth as f32) - look.px(9.);
+            let height = look.row - look.px(10.);
+            window.paint_quad(
+                fill(
+                    Bounds::new(
+                        point(left, look.y(row as f32) - height / 2.),
+                        size(look.px(3.), height),
+                    ),
+                    look.line(reach.saturating_sub(1)),
+                )
+                .corner_radii(look.px(1.5)),
+            );
         }
     });
 }
 
+/// A row's background, from just left of its chevron to the right end, with soft corners.
 fn band(window: &mut Window, look: &Look, depth: f32, row: f32, color: Hsla) {
     let left = look.x(depth) - look.px(11.);
     let height = look.row - look.px(2.);
