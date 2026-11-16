@@ -386,6 +386,9 @@ impl Workspace {
                 this.show_copied(code.clone(), "Copied code", cx)
             }),
             cx.on_app_quit(|this, cx| {
+                if crate::settings(cx).auto_save {
+                    this.save_edited_now(cx);
+                }
                 this.save_session(cx);
                 async {}
             }),
@@ -961,6 +964,13 @@ impl Workspace {
         self.save_edited_tasks(window, cx)
             .into_iter()
             .for_each(Task::detach);
+    }
+
+    /// Auto-save as subwy quits, on both sides of a split.
+    pub fn save_edited_now(&mut self, cx: &mut Context<Self>) {
+        for side in self.sides() {
+            side.update(cx, |tabs, cx| tabs.save_edited_now(cx));
+        }
     }
 
     /// The writes of the edited tabs that need no question, on both sides of a split.

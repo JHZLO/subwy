@@ -884,6 +884,29 @@ impl EditorTabs {
             .collect()
     }
 
+    /// [`Self::save_edited`] for a quit from outside (the Dock, a script, logging out), which
+    /// skips the Quit key's own saving. It writes on this thread: GPUI gives quit handlers 200 ms
+    /// and runs no other task meanwhile. A tab still being written keeps that write.
+    pub fn save_edited_now(&mut self, cx: &mut Context<Self>) {
+        for tab in self
+            .tabs
+            .iter_mut()
+            .filter(|t| t.dirty && !t.read_only && !t.deleted && t.conflict.is_none() && !t.saving)
+        {
+            let path = self
+                .folders
+                .absolute(&tab.path)
+                .unwrap_or_else(|| tab.path.clone());
+            let text = tab.editor.read(cx).text().to_string();
+            if let Saved::Written(stamp) =
+                write_file(&path, &text, Some(tab.stamp), tab.line_ending, tab.bom)
+            {
+                tab.stamp = stamp;
+                tab.dirty = false;
+            }
+        }
+    }
+
     /// Writes the tab to disk. Unless `overwrite`, the file must not have changed on disk since it
     /// was read or written: `ask` asks whether to replace it, otherwise the tab stays edited.
     /// `then_close` closes the tab once the file is written.

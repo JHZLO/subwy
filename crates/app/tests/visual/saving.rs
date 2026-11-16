@@ -8,6 +8,7 @@ use crate::check::Check;
 
 pub fn run(check: &mut Check) {
     saves_after_focus_loss(check);
+    saves_as_subwy_quits(check);
     pasted_returns_save_as_the_files_line_ending(check);
 }
 
@@ -47,6 +48,26 @@ fn saves_after_focus_loss(check: &mut Check) {
         "its edits stay in the tab",
         text,
         Some("ybeta\n".to_string()),
+    );
+}
+
+/// Quit from outside (the Dock, a script) skips the Quit key's saving; the quit handler writes the
+/// edits before subwy is gone.
+fn saves_as_subwy_quits(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let a = dir.path().join("a.md");
+    fs::write(&a, "alpha\n").expect("write");
+    let window = check.open(Some(dir.path()));
+
+    // Rows: the folder, a.md.
+    check.keys(window, "down down enter");
+    check.cx.simulate_input(window, "q");
+    // What the quit handler does.
+    check.update_workspace(window, |w, _, cx| w.save_edited_now(cx));
+    check.expect_eq(
+        "an edited file is written as subwy quits",
+        fs::read_to_string(&a).ok(),
+        Some("qalpha\n".to_string()),
     );
 }
 
