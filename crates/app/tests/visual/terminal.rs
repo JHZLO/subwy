@@ -81,7 +81,8 @@ pub fn run(check: &mut Check) {
     let two = wait_for(check, window, |lines| lines.iter().any(|l| l == "two"));
     check.expect_eq("keys go to the tab in front", two, true);
     check.shot(window, "terminal-2-tabs");
-    check.keys(window, "cmd-shift-[");
+    // A real Cmd+Shift+[ arrives as Cmd+{.
+    check.keys(window, "cmd-{");
     let first = wait_for(check, window, |lines| lines.iter().any(|l| l == "hi"));
     check.expect_eq("cmd-shift-[ goes back to the first tab", first, true);
     check.keys(window, "cmd-shift-right");
@@ -171,7 +172,7 @@ fn reopen(check: &mut Check) {
     });
     check.expect_eq("the tab in front is back in its folder", front, true);
     check.shot(window, "terminal-3-reopened");
-    check.keys(window, "cmd-shift-[");
+    check.keys(window, "cmd-{");
     wait_for(check, window, |lines| {
         lines.iter().any(|l| l.ends_with('$'))
     });

@@ -37,6 +37,14 @@ fn switches_with_arrows(check: &mut Check) {
         after,
         Some(PathBuf::from("b.md")),
     );
+    // A real Cmd+Shift+[ arrives as Cmd+{.
+    check.keys(window, "cmd-{");
+    let bracket = active(check);
+    check.expect_eq(
+        "tabs: cmd-shift-[ goes to the tab before",
+        bracket,
+        Some(PathBuf::from("a.md")),
+    );
 }
 
 /// A file dragged from the tree onto the editor's right half opens beside the others; dropped on
