@@ -116,6 +116,15 @@ fn speed_search(check: &mut Check) {
         Some(PathBuf::from("docs/guide/keys.md")),
     );
 
+    // Cmd+A selects the query, as in a field: the next letters replace it.
+    check.keys(window, "cmd-a n o t");
+    let selected = selection(check, window);
+    check.expect_eq(
+        "cmd-a and typing replace the query",
+        selected,
+        Some(PathBuf::from("docs/notes.md")),
+    );
+
     // Enter opens the match.
     check.keys(window, "escape r e a");
     let selected = selection(check, window);

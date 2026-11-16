@@ -230,6 +230,9 @@ fn own_keys() -> Vec<Own> {
         own("cmd-x", CutItems, panel),
         own("cmd-c", CopyItems, panel),
         own("cmd-v", PasteItems, panel),
+        // In the speed search it selects the query, as in a field; the Edit menu's Select All
+        // has the key only in inputs.
+        own("cmd-a", gpui_kit::component::input::SelectAll, panel),
         own("f5", CopyTo, panel),
         own("f6", MoveTo, panel),
         // IntelliJ's Expand All and Collapse All. Cmd+Shift+= also reads as Cmd++, which zooms in

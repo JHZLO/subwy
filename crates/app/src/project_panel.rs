@@ -11,7 +11,7 @@ use gpui_kit::{
     assets::IconName,
     component::{
         Icon,
-        input::{Input, InputEvent, InputState},
+        input::{Input, InputEvent, InputState, SelectAll},
         tooltip::Tooltip,
     },
     prelude::FluentBuilder as _,
@@ -293,6 +293,8 @@ pub struct ProjectPanel {
     pub width: f32,
     /// The speed search text while a search is on (IntelliJ: type in the tree to find a name).
     search: Option<String>,
+    /// Cmd+A selected the whole search text: the next letter replaces it, Backspace clears it.
+    search_all: bool,
     /// Ends the search and drops a name being typed when focus leaves the tree. Made on first
     /// use: `new` has no window.
     focus_out: Option<Subscription>,
@@ -446,6 +448,7 @@ impl ProjectPanel {
             show_key_hints: crate::settings(cx).key_hints,
             width: size::TREE_WIDTH,
             search: None,
+            search_all: false,
             focus_out: None,
             reveal_pending: false,
             edit: None,
@@ -640,6 +643,7 @@ impl ProjectPanel {
 
     /// Selects the match `step` points at; with no match the selection stays.
     fn search_step(&mut self, step: SearchStep, cx: &mut Context<Self>) {
+        self.search_all = false;
         let Some(query) = &self.search else {
             return;
         };
@@ -682,7 +686,11 @@ impl ProjectPanel {
             let Some(query) = &mut self.search else {
                 return;
             };
-            query.pop();
+            if std::mem::take(&mut self.search_all) {
+                query.clear();
+            } else {
+                query.pop();
+            }
             if query.is_empty() {
                 self.search = None;
             }
@@ -698,9 +706,26 @@ impl ProjectPanel {
             return;
         };
         self.watch_focus(window, cx);
-        self.search.get_or_insert_default().push_str(text);
+        let replace = std::mem::take(&mut self.search_all);
+        let query = self.search.get_or_insert_default();
+        if replace {
+            query.clear();
+        }
+        query.push_str(text);
         self.search_step(SearchStep::Here, cx);
         cx.stop_propagation();
+    }
+
+    /// Cmd+A in the speed search selects its text, as in a field. Elsewhere in the tree it does
+    /// nothing.
+    fn select_search(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        match &self.search {
+            Some(query) if !query.is_empty() => {
+                self.search_all = true;
+                cx.notify();
+            }
+            _ => cx.propagate(),
+        }
     }
 
     /// Cmd+F, as in IntelliJ's tree: opens the speed search empty, so the next letters find a name.
@@ -2153,6 +2178,15 @@ impl ProjectPanel {
                                 if query.is_empty() {
                                     el.child(caret)
                                         .child(div().text_color(c(p.ignored)).child("Find a name"))
+                                } else if self.search_all {
+                                    // Selected whole, as a field shows it: no caret.
+                                    el.child(
+                                        div()
+                                            .rounded(z(2., cx))
+                                            .bg(c(p.sel_bg))
+                                            .text_color(c(p.sel_ink))
+                                            .child(query.to_string()),
+                                    )
                                 } else {
                                     el.child(div().text_color(c(p.ink)).child(query.to_string()))
                                         .child(caret)
@@ -2833,6 +2867,7 @@ impl Render for ProjectPanel {
             .on_action(
                 cx.listener(|this, _: &SpeedSearch, window, cx| this.start_search(window, cx)),
             )
+            .on_action(cx.listener(Self::select_search))
             .on_action(cx.listener(|this, _: &NewFile, window, cx| this.new_file(window, cx)))
             .on_action(cx.listener(|this, _: &Rename, window, cx| this.rename(window, cx)))
             .on_action(cx.listener(|this, _: &Trash, window, cx| this.trash(window, cx)))
