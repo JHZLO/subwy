@@ -7,7 +7,7 @@ use gpui_kit::{
     AnyWindowHandle,
     component::{Theme, ThemeMode},
 };
-use subwy_project::settings::{Appearance, Settings};
+use subwy_project::settings::{Appearance, Settings, Skin};
 
 use crate::check::{Check, fixture};
 
@@ -80,6 +80,31 @@ pub fn run(check: &mut Check) {
     change(check, window, |s| s.editor_font = "SF Mono".into());
     let dark = check.cx.update(|cx| Theme::global(cx).mode.is_dark());
     check.expect_eq("appearance light turns it light", dark, false);
+    // A skin is light or dark by itself, whatever the appearance, and brings its own paper.
+    let look = |check: &mut Check| {
+        check.cx.update(|cx| {
+            (
+                Theme::global(cx).mode.is_dark(),
+                subwy::theme::colors(cx).paper,
+            )
+        })
+    };
+    change(check, window, |s| s.skin = Skin::Tunnel);
+    let tunnel = look(check);
+    check.expect_eq(
+        "a dark skin turns a light appearance dark",
+        tunnel,
+        (true, subwy::theme::TUNNEL.paper),
+    );
+    change(check, window, |s| s.skin = Skin::Kraft);
+    check.shot(window, "settings-skin-kraft");
+    let kraft = look(check);
+    check.expect_eq(
+        "a light skin brings its own paper",
+        kraft,
+        (false, subwy::theme::KRAFT.paper),
+    );
+    change(check, window, |s| s.skin = Skin::Subwy);
     change(check, window, |s| s.appearance = Appearance::System);
     // The Tree page, its switches; Cmd+W closes the dialog, not the file behind it.
     check.keys(window, "cmd-,");

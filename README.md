@@ -166,6 +166,7 @@ first run; changes made to it by hand apply the next time subwy starts.
   "outline": true,
   "auto_save": true,
   "appearance": "system",
+  "skin": "subwy",
   "key_hints": true,
   "show_ignored": true,
   "follow_active_file": true,
@@ -180,7 +181,10 @@ first run; changes made to it by hand apply the next time subwy starts.
 }
 ```
 
-`soft_wrap` is `markdown`, `all` or `none`; `appearance` is `system`, `light` or `dark`. An empty `terminal_shell`
+`soft_wrap` is `markdown`, `all` or `none`; `appearance` is `system`, `light` or `dark`. `skin` is subwy's own
+colors (`subwy`, which follows `appearance`) or one of the dark `first_train`, `night_express`, `tunnel` and the light
+paper `daylight_paper`, `kraft`, `ticket`, `newsprint`, `sepia_map`; a skin other than `subwy` is light or dark by
+itself. An empty `terminal_shell`
 is your login shell, and a `null` `terminal_font_size` follows the editor's. With `auto_save`, edited files save when
 subwy loses focus or its terminal takes the keyboard, and before a window closes or subwy quits; a file changed on disk since it was opened is left
 unsaved (the status bar says so) and asked about when closing. Tabs mark unsaved edits with a dot only when

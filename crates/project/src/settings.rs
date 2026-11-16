@@ -33,6 +33,8 @@ pub struct Settings {
     pub auto_save: bool,
     /// Light, dark, or as macOS is set.
     pub appearance: Appearance,
+    /// The colors: subwy's own, light or dark as `appearance` says, or a skin.
+    pub skin: Skin,
     /// The key hint line under the tree.
     pub key_hints: bool,
     /// Gitignored items in the tree, dimmed; `false` leaves them out.
@@ -61,6 +63,61 @@ pub enum Appearance {
     System,
     Light,
     Dark,
+}
+
+/// A set of colors. subwy's own follows the appearance; every other skin is light or dark itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Skin {
+    #[default]
+    Subwy,
+    FirstTrain,
+    NightExpress,
+    Tunnel,
+    DaylightPaper,
+    Kraft,
+    Ticket,
+    Newsprint,
+    SepiaMap,
+}
+
+impl Skin {
+    pub const ALL: [Skin; 9] = [
+        Skin::Subwy,
+        Skin::FirstTrain,
+        Skin::NightExpress,
+        Skin::Tunnel,
+        Skin::DaylightPaper,
+        Skin::Kraft,
+        Skin::Ticket,
+        Skin::Newsprint,
+        Skin::SepiaMap,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Skin::Subwy => "subwy",
+            Skin::FirstTrain => "First Train",
+            Skin::NightExpress => "Night Express",
+            Skin::Tunnel => "Tunnel",
+            Skin::DaylightPaper => "Daylight Paper",
+            Skin::Kraft => "Kraft",
+            Skin::Ticket => "Ticket",
+            Skin::Newsprint => "Newsprint",
+            Skin::SepiaMap => "Sepia Map",
+        }
+    }
+
+    /// Whether the skin is dark; `None` for subwy's own, which the appearance decides.
+    pub fn dark(self) -> Option<bool> {
+        match self {
+            Skin::Subwy => None,
+            Skin::FirstTrain | Skin::NightExpress | Skin::Tunnel => Some(true),
+            Skin::DaylightPaper | Skin::Kraft | Skin::Ticket | Skin::Newsprint | Skin::SepiaMap => {
+                Some(false)
+            }
+        }
+    }
 }
 
 /// Which files wrap long lines. Wrapping costs time on large files, so Markdown only by default.
@@ -215,6 +272,7 @@ impl Default for Settings {
             outline: true,
             auto_save: true,
             appearance: Appearance::System,
+            skin: Skin::Subwy,
             key_hints: true,
             show_ignored: true,
             follow_active_file: true,
@@ -359,6 +417,17 @@ mod tests {
         assert!(error.unwrap().contains("tab_sise"));
         std::fs::write(&path, r#"{ "tab_size": 0 }"#).unwrap();
         assert!(load(&path).1.unwrap().contains("tab_size"));
+    }
+
+    #[test]
+    fn a_skin_reads_by_its_snake_case_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{ "skin": "sepia_map" }"#).unwrap();
+        assert_eq!(load(&path).0.skin, Skin::SepiaMap);
+        assert_eq!(Skin::SepiaMap.dark(), Some(false));
+        assert_eq!(Skin::Tunnel.dark(), Some(true));
+        assert_eq!(Settings::default().skin.dark(), None);
     }
 
     #[test]

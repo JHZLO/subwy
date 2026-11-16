@@ -13,7 +13,7 @@ use gpui_kit::{
     },
     *,
 };
-use subwy_project::settings::{Appearance, Settings, SoftWrap};
+use subwy_project::settings::{Appearance, Settings, Skin, SoftWrap};
 
 use crate::{
     keymap::{CloseSettings, SETTINGS},
@@ -260,6 +260,11 @@ fn appearance_value(appearance: Appearance) -> SharedString {
     .into()
 }
 
+/// A skin as the dropdown keys it: its name, which is unique.
+fn skin_value(skin: Skin) -> SharedString {
+    skin.name().into()
+}
+
 fn appearance_page() -> SettingPage {
     SettingPage::new("Appearance").group(
         SettingGroup::new().items([
@@ -284,6 +289,25 @@ fn appearance_page() -> SettingPage {
                 .default_value(appearance_value(Appearance::System)),
             )
             .description("Light or dark paper; As macOS follows the system as it changes."),
+            SettingItem::new(
+                "Skin",
+                SettingField::dropdown(
+                    Skin::ALL
+                        .iter()
+                        .map(|skin| (skin_value(*skin), skin.name().into()))
+                        .collect(),
+                    |cx| skin_value(settings(cx).skin),
+                    |value, cx| {
+                        let skin = Skin::ALL
+                            .into_iter()
+                            .find(|skin| skin_value(*skin) == value)
+                            .unwrap_or_default();
+                        update_settings(cx, |s| s.skin = skin)
+                    },
+                )
+                .default_value(skin_value(Skin::Subwy)),
+            )
+            .description("The colors. Every skin but subwy's own is light or dark by itself."),
             SettingItem::new(
                 "Zoom",
                 SettingField::dropdown(
