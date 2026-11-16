@@ -84,6 +84,12 @@ pub fn run(check: &mut Check) {
     check.keys(window, "cmd-shift-[");
     let first = wait_for(check, window, |lines| lines.iter().any(|l| l == "hi"));
     check.expect_eq("cmd-shift-[ goes back to the first tab", first, true);
+    check.keys(window, "cmd-shift-right");
+    let second = wait_for(check, window, |lines| lines.iter().any(|l| l == "two"));
+    check.expect_eq("cmd-shift-right goes to the next tab", second, true);
+    check.keys(window, "cmd-shift-left");
+    let back = wait_for(check, window, |lines| lines.iter().any(|l| l == "hi"));
+    check.expect_eq("cmd-shift-left goes back a tab", back, true);
     check.keys(window, "cmd-w");
     let tabs = check.workspace(window, |w, cx| w.terminal_tabs(cx));
     check.expect_eq("cmd-w closes the tab in front", tabs, 1);

@@ -196,6 +196,12 @@ fn own_keys() -> Vec<Own> {
         own("alt-f7", FindBacklinks, ws),
         own("cmd-shift-[", PrevTab, ws),
         own("cmd-shift-]", NextTab, ws),
+        // The user asked for the arrows too, in the editor as in the terminal. They win over the
+        // editor's select to line start and end, which Shift+Home and Shift+End still do.
+        own("cmd-shift-left", PrevTab, ws),
+        own("cmd-shift-right", NextTab, ws),
+        own("cmd-shift-left", PrevTab, Some(EDITOR_INPUT)),
+        own("cmd-shift-right", NextTab, Some(EDITOR_INPUT)),
         own("cmd-shift-v", TogglePreview, ws),
         own("cmd-=", ZoomIn, ws),
         own("cmd-+", ZoomIn, ws),
@@ -290,6 +296,8 @@ fn own_keys() -> Vec<Own> {
         own("cmd-w", CloseTerminal, Some(TERMINAL)),
         own("cmd-shift-[", PrevTerminal, Some(TERMINAL)),
         own("cmd-shift-]", NextTerminal, Some(TERMINAL)),
+        own("cmd-shift-left", PrevTerminal, Some(TERMINAL)),
+        own("cmd-shift-right", NextTerminal, Some(TERMINAL)),
     ]
 }
 

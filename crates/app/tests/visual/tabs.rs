@@ -8,7 +8,35 @@ use crate::check::Check;
 
 pub fn run(check: &mut Check) {
     reopens_closed_tabs(check);
+    switches_with_arrows(check);
     splits_by_dropping(check);
+}
+
+/// Cmd+Shift+Left and Right in the editor go to the tab before and after, as in the terminal.
+fn switches_with_arrows(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    for name in ["a.md", "b.md"] {
+        fs::write(dir.path().join(name), format!("# {name}\n")).expect("write");
+    }
+    let window = check.open(Some(dir.path()));
+    // Rows: the folder, a.md, b.md. b.md opens last, in front.
+    check.keys(window, "down down enter cmd-1 down enter");
+    let active = |check: &mut Check| check.workspace(window, |w, cx| w.active_file(cx));
+    check.wait_until(|check| active(check) == Some(PathBuf::from("b.md")));
+    check.keys(window, "cmd-shift-left");
+    let before = active(check);
+    check.expect_eq(
+        "tabs: cmd-shift-left goes to the tab before",
+        before,
+        Some(PathBuf::from("a.md")),
+    );
+    check.keys(window, "cmd-shift-right");
+    let after = active(check);
+    check.expect_eq(
+        "tabs: cmd-shift-right goes to the tab after",
+        after,
+        Some(PathBuf::from("b.md")),
+    );
 }
 
 /// A file dragged from the tree onto the editor's right half opens beside the others; dropped on

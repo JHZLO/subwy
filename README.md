@@ -104,7 +104,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Cmd+S`, `Cmd+W` | Save, close the tab |
 | | `Cmd+Shift+T` | Open the tab closed last again, its caret where it was |
 | | drag a file onto the editor's right half | Split the editor in two, the file on the right (drag the gap to resize). A file dropped on the other side moves there, and a side left without tabs closes |
-| | `Cmd+Shift+[` / `]` | Previous / next tab |
+| | `Cmd+Shift+[` / `]`, `Cmd+Shift+Left` / `Right` | Previous / next tab (the arrows take the place of selecting to the line's start or end; `Shift+Home` / `End` still do that) |
 | | `Cmd+Shift+V` | Markdown preview beside the editor (in the editor alone, an outline at the right shows the headings as stations on a line; click one to go there) (the buttons at the tab bar's right also show the preview alone; drag the line between them) |
 | | `Cmd+=`, `Cmd+-`, `Cmd+0` | Zoom in, out, back to 100% |
 | | `Alt+F12` | Focus the terminal, which opens with the folder (in the terminal: hide it, the shell keeps running) |
@@ -125,7 +125,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Esc` | Back to the editor |
 | Empty window | arrows, `Enter` | The recent folders are drawn as a subway map, a line for each folder they sit in: `Left` / `Right` move along a line, `Up` / `Down` to the nearest station on the next line; `Enter` or a click opens it |
 | Terminal | `Cmd+C`, `Cmd+V` | Copy the selection, paste |
-| | `Cmd+W`, `Cmd+Shift+[` / `]` | Close the terminal tab, previous / next terminal tab |
+| | `Cmd+W`, `Cmd+Shift+[` / `]` or `Left` / `Right` | Close the terminal tab, previous / next terminal tab |
 | Editor | `Backspace` | In a line's leading spaces, back a whole indent at once (the tab size; in a Markdown list, the list's indent) |
 | | `Cmd+D` | Duplicate the line, or the selection |
 | | `Cmd+Backspace` | Delete the line (every line the selection touches) |
