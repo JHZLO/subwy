@@ -103,6 +103,7 @@ macOS knows about (the one in `/Applications`). Set `SUBWY_APP=/path/to/subwy.ap
 | | `Cmd+Alt+R` | Reveal in Finder |
 | | `Cmd+S`, `Cmd+W` | Save, close the tab |
 | | `Cmd+Shift+T` | Open the tab closed last again, its caret where it was |
+| | drag a file onto the editor's right half | Split the editor in two, the file on the right (drag the gap to resize). A file dropped on the other side moves there, and a side left without tabs closes |
 | | `Cmd+Shift+[` / `]` | Previous / next tab |
 | | `Cmd+Shift+V` | Markdown preview beside the editor (in the editor alone, an outline at the right shows the headings as stations on a line; click one to go there) (the buttons at the tab bar's right also show the preview alone; drag the line between them) |
 | | `Cmd+=`, `Cmd+-`, `Cmd+0` | Zoom in, out, back to 100% |

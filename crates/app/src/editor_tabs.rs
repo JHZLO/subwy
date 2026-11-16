@@ -1080,6 +1080,29 @@ impl EditorTabs {
         cx.notify();
     }
 
+    /// Whether `path` has a tab here.
+    pub fn holds(&self, path: &Path) -> bool {
+        self.tabs.iter().any(|t| t.path == path)
+    }
+
+    /// No tab, and none being read.
+    pub fn is_empty(&self) -> bool {
+        self.tabs.is_empty() && self.pending.is_empty()
+    }
+
+    /// Lets `path` go to the other side of a split: its tab here goes, unless it has unsaved edits,
+    /// which keep it here (true), as two copies would write over each other.
+    pub fn release(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        match self.tabs.iter().position(|t| t.path == path) {
+            Some(index) if self.tabs[index].dirty => true,
+            Some(index) => {
+                self.remove_tab(index, window, cx);
+                false
+            }
+            None => false,
+        }
+    }
+
     /// Closes the active tab, asking first when it has unsaved edits.
     pub fn close_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(index) = self.active {

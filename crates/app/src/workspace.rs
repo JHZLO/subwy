@@ -60,6 +60,9 @@ struct SettingsDialog {
 /// What the gap above the terminal drags; the terminal resizes as it moves.
 struct TerminalResize;
 
+/// Dragging the gap between the two sides of a split editor.
+struct PaneResize;
+
 /// The shells under the editor, kept while hidden so they survive Alt+F12.
 struct Terminal {
     view: Entity<TerminalTabs>,
@@ -76,7 +79,14 @@ struct Overlay {
 
 pub struct Workspace {
     panel: Option<Entity<ProjectPanel>>,
+    /// The editor, or its left side when split.
     tabs: Entity<EditorTabs>,
+    /// The right side when the editor is split in two (a file dropped on its right half).
+    split: Option<Entity<EditorTabs>>,
+    /// The keys and opened files go to the right side: it had focus last.
+    right_active: bool,
+    /// The left side's share of the editor's width while split, dragged from the gap between.
+    split_ratio: f32,
     tree_visible: bool,
     terminal: Option<Terminal>,
     /// The terminal's height at 100% zoom, dragged from the gap above it.
@@ -409,6 +419,9 @@ impl Workspace {
         Self {
             panel: None,
             tabs,
+            split: None,
+            right_active: false,
+            split_ratio: 0.5,
             tree_visible: true,
             terminal: None,
             terminal_height: size::TERMINAL_HEIGHT,
@@ -493,8 +506,12 @@ impl Workspace {
         let Some(abs) = folders.absolute(rel) else {
             return;
         };
-        if self.tabs.read(cx).unsaved_under(rel) {
-            self.tabs.update(cx, |tabs, cx| {
+        if self
+            .sides()
+            .iter()
+            .any(|side| side.read(cx).unsaved_under(rel))
+        {
+            self.pane().clone().update(cx, |tabs, cx| {
                 tabs.error = Some(format!(
                     "Save or close the changed files in {} first",
                     paths::relative(rel)
@@ -550,8 +567,7 @@ impl Workspace {
             |this, panel, event: &PanelEvent, window, cx| match event {
                 PanelEvent::Open { path, pass_through } => {
                     let pass_through = *pass_through;
-                    this.tabs
-                        .update(cx, |tabs, cx| tabs.open(path, pass_through, window, cx));
+                    this.open_here(path, None, pass_through, window, cx);
                     if !pass_through {
                         this.focus_editor_area(window, cx);
                     }
@@ -576,28 +592,25 @@ impl Workspace {
         self._subscriptions.push(cx.subscribe_in(
             &panel,
             window,
-            |this, _, event: &FileEvent, window, cx| {
-                match event {
-                    FileEvent::Renamed { from, to } => this
-                        .tabs
-                        .update(cx, |tabs, cx| tabs.renamed(from, to, window, cx)),
-                    FileEvent::Trashed { path } => this
-                        .tabs
-                        .update(cx, |tabs, cx| tabs.trashed(path, window, cx)),
+            |this, _, event: &FileEvent, window, cx| match event {
+                FileEvent::Renamed { from, to } => {
+                    for side in this.sides() {
+                        side.update(cx, |tabs, cx| tabs.renamed(from, to, window, cx));
+                    }
+                }
+                FileEvent::Trashed { path } => {
+                    for side in this.sides() {
+                        side.update(cx, |tabs, cx| tabs.trashed(path, window, cx));
+                    }
                 }
             },
         ));
         if self.panel.is_some() {
-            self.tabs
-                .update(cx, |tabs, cx| tabs.set_folders(folders.clone(), window, cx));
+            for side in self.sides() {
+                side.update(cx, |tabs, cx| tabs.set_folders(folders.clone(), window, cx));
+            }
         } else {
-            self.tabs = cx.new(|cx| EditorTabs::new(folders.clone(), cx));
-            self._subscriptions
-                .push(cx.subscribe(&self.tabs, |this, _, _: &TabsChanged, cx| {
-                    this.follow_active_file(cx);
-                    this.schedule_save(cx);
-                    cx.notify();
-                }));
+            self.tabs = self.new_side(folders.clone(), window, cx);
         }
         self._subscriptions
             .push(cx.observe(&panel, |this, _, cx| this.schedule_save(cx)));
@@ -649,6 +662,12 @@ impl Workspace {
                     tabs.toggle_preview(cx);
                 }
             });
+            if !saved.split_tabs.is_empty() {
+                let right = self.right_side(window, cx);
+                right.update(cx, |tabs, cx| {
+                    tabs.restore(&saved.split_tabs, saved.split_active, window, cx)
+                });
+            }
         }
         self.schedule_save(cx);
         cx.notify();
@@ -678,15 +697,134 @@ impl Workspace {
         .detach();
     }
 
-    /// Items dropped on the editor open: files from the tree or from Finder. Something from
-    /// outside the window's folders opens as Finder would open it in subwy (`open_path`).
-    fn drop_on_editor(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
+    /// The side the keys and opened files go to: the right one while it had focus last.
+    fn pane(&self) -> &Entity<EditorTabs> {
+        match (&self.split, self.right_active) {
+            (Some(right), true) => right,
+            _ => &self.tabs,
+        }
+    }
+
+    /// The editor's sides: the left (or only) one, then the right while split.
+    fn sides(&self) -> Vec<Entity<EditorTabs>> {
+        std::iter::once(self.tabs.clone())
+            .chain(self.split.clone())
+            .collect()
+    }
+
+    /// A side of the editor, its events followed.
+    fn new_side(
+        &mut self,
+        folders: Folders,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorTabs> {
+        let side = cx.new(|cx| EditorTabs::new(folders, cx));
+        let id = side.entity_id();
+        let focus = side.read(cx).focus_handle(cx);
+        self._subscriptions.extend([
+            cx.subscribe(&side, |this, _, _: &TabsChanged, cx| {
+                this.close_empty_side(cx);
+                this.follow_active_file(cx);
+                this.schedule_save(cx);
+                cx.notify();
+            }),
+            cx.subscribe(&side, |this, _, CodeCopied(code), cx| {
+                this.show_copied(code.clone(), "Copied code", cx)
+            }),
+            // Whichever side is clicked or typed in takes what opens next.
+            cx.on_focus_in(&focus, window, move |this, _, cx| {
+                this.right_active = this.split.as_ref().is_some_and(|r| r.entity_id() == id);
+                cx.notify();
+            }),
+        ]);
+        side
+    }
+
+    /// The split's right side, made (empty) when the editor is not split yet.
+    fn right_side(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<EditorTabs> {
+        if let Some(right) = &self.split {
+            return right.clone();
+        }
+        let Some(folders) = self.folders(cx) else {
+            return self.tabs.clone();
+        };
+        let right = self.new_side(folders, window, cx);
+        self.split = Some(right.clone());
+        right
+    }
+
+    /// A side that has lost its last tab goes, and the other takes the whole editor.
+    fn close_empty_side(&mut self, cx: &mut Context<Self>) {
+        let Some(right) = self.split.clone() else {
+            return;
+        };
+        if self.tabs.read(cx).is_empty() {
+            // The right side moves over, and with it the button that shows a hidden tree.
+            let hidden = !self.tree_visible;
+            right.update(cx, |tabs, _| tabs.tree_hidden = hidden);
+            self.tabs = right;
+        } else if !right.read(cx).is_empty() {
+            return;
+        }
+        self.split = None;
+        self.right_active = false;
+    }
+
+    /// Opens `path` (at `line`) on the side that has it, or else on the active side.
+    fn open_here(
+        &mut self,
+        path: &Path,
+        line: Option<u32>,
+        pass_through: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(right) = &self.split {
+            if right.read(cx).holds(path) {
+                self.right_active = true;
+            } else if self.tabs.read(cx).holds(path) {
+                self.right_active = false;
+            }
+        }
+        self.pane().clone().update(cx, |tabs, cx| match line {
+            Some(line) => tabs.open_at(path, line, window, cx),
+            None => tabs.open(path, pass_through, window, cx),
+        });
+    }
+
+    /// Files dropped on a side of the editor open on it; dropped on the right half of an editor
+    /// not split yet, they split it. A file open on the other side moves over (one file, one
+    /// side), unless it has unsaved edits there, where it is shown instead.
+    fn drop_into(
+        &mut self,
+        right: bool,
+        paths: &[PathBuf],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let folders = self.folders(cx);
         for path in paths {
             match folders.as_ref().and_then(|folders| folders.relative(path)) {
-                Some(rel) if path.is_file() => self
-                    .tabs
-                    .update(cx, |tabs, cx| tabs.open(&rel, false, window, cx)),
+                Some(rel) if path.is_file() => {
+                    let other = match right {
+                        true => Some(self.tabs.clone()),
+                        false => self.split.clone(),
+                    };
+                    let kept = other.is_some_and(|other| {
+                        other.update(cx, |tabs, cx| tabs.release(&rel, window, cx))
+                    });
+                    if kept {
+                        self.open_here(&rel, None, false, window, cx);
+                        continue;
+                    }
+                    let side = match right {
+                        true => self.right_side(window, cx),
+                        false => self.tabs.clone(),
+                    };
+                    self.right_active = right && self.split.is_some();
+                    side.update(cx, |tabs, cx| tabs.open(&rel, false, window, cx));
+                }
                 // A folder of this window: nothing to open.
                 Some(_) => {}
                 None => {
@@ -730,12 +868,20 @@ impl Workspace {
 
     /// Files from Finder dropped on the editor: pictures on a Markdown tab are linked there, and
     /// anything else opens.
-    fn drop_from_finder(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
-        let linked = self
-            .tabs
-            .update(cx, |tabs, cx| tabs.drop_pictures(paths, window, cx));
+    fn drop_from_finder(
+        &mut self,
+        right: bool,
+        paths: &[PathBuf],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let side = match (&self.split, right) {
+            (Some(split), true) => split.clone(),
+            _ => self.tabs.clone(),
+        };
+        let linked = side.update(cx, |tabs, cx| tabs.drop_pictures(paths, window, cx));
         if !linked {
-            self.drop_on_editor(paths, window, cx);
+            self.drop_into(right, paths, window, cx);
         } else if self.panel.is_some() {
             self.focus_editor_area(window, cx);
         }
@@ -758,8 +904,7 @@ impl Workspace {
         let Some(rel) = self.folders(cx).and_then(|folders| folders.relative(file)) else {
             return;
         };
-        self.tabs
-            .update(cx, |tabs, cx| tabs.open(&rel, false, window, cx));
+        self.open_here(&rel, None, false, window, cx);
     }
 
     /// Watches the folders; each batch of outside changes refreshes the tree and the open files.
@@ -796,9 +941,11 @@ impl Workspace {
                     if let Some(panel) = this.panel.clone() {
                         panel.update(cx, |panel, cx| panel.refresh_dirs(&changes.dirs, cx));
                     }
-                    this.tabs.update(cx, |tabs, cx| {
-                        tabs.files_changed(&changes.files, window, cx)
-                    });
+                    for side in this.sides() {
+                        side.update(cx, |tabs, cx| {
+                            tabs.files_changed(&changes.files, window, cx)
+                        });
+                    }
                 });
                 if applied.is_err() {
                     break;
@@ -811,10 +958,26 @@ impl Workspace {
     /// Auto-save, when the window loses focus or the terminal takes it: writes the edited tabs that
     /// need no question.
     pub fn save_edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let saves = self
-            .tabs
-            .update(cx, |tabs, cx| tabs.save_edited(window, cx));
-        saves.into_iter().for_each(Task::detach);
+        self.save_edited_tasks(window, cx)
+            .into_iter()
+            .for_each(Task::detach);
+    }
+
+    /// The writes of the edited tabs that need no question, on both sides of a split.
+    fn save_edited_tasks(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<Task<()>> {
+        let mut saves = Vec::new();
+        for side in self.sides() {
+            saves.extend(side.update(cx, |tabs, cx| tabs.save_edited(window, cx)));
+        }
+        saves
+    }
+
+    /// Tabs with unsaved changes on either side.
+    fn unsaved_here(&self, cx: &App) -> usize {
+        self.sides()
+            .iter()
+            .map(|side| side.read(cx).tabs_unsaved())
+            .sum()
     }
 
     /// Tabs with unsaved changes that `then` would close: this window's, or every window's.
@@ -824,10 +987,10 @@ impl Workspace {
             AfterDiscard::Quit => live_windows(cx)
                 .iter()
                 .filter(|(handle, _)| *handle != self.window)
-                .map(|(_, workspace)| workspace.read(cx).tabs.read(cx).tabs_unsaved())
+                .map(|(_, workspace)| workspace.read(cx).unsaved_here(cx))
                 .sum(),
         };
-        self.tabs.read(cx).tabs_unsaved() + others
+        self.unsaved_here(cx) + others
     }
 
     /// True when nothing would be lost. Otherwise, with auto-save, writes what it can first; asks
@@ -846,20 +1009,15 @@ impl Workspace {
             self.ask_discard(then, window, cx);
             return false;
         }
-        let mut saves = self
-            .tabs
-            .update(cx, |tabs, cx| tabs.save_edited(window, cx));
+        let mut saves = self.save_edited_tasks(window, cx);
         if matches!(then, AfterDiscard::Quit) {
             for (handle, workspace) in live_windows(cx) {
                 if handle == self.window {
                     continue;
                 }
                 let _ = handle.update(cx, |_, window, cx| {
-                    let more = workspace.update(cx, |workspace, cx| {
-                        workspace
-                            .tabs
-                            .update(cx, |tabs, cx| tabs.save_edited(window, cx))
-                    });
+                    let more = workspace
+                        .update(cx, |workspace, cx| workspace.save_edited_tasks(window, cx));
                     saves.extend(more);
                 });
             }
@@ -925,6 +1083,10 @@ impl Workspace {
         let tabs = self.tabs.read(cx);
         (saved.tabs, saved.active_tab) = tabs.session_tabs(cx);
         saved.preview = tabs.preview_open();
+        (saved.split_tabs, saved.split_active) = match &self.split {
+            Some(right) => right.read(cx).session_tabs(cx),
+            None => (Vec::new(), None),
+        };
         saved.terminal = self.terminal.as_ref().map(|terminal| {
             let (tabs, active) = terminal.view.read(cx).session(cx);
             session::TerminalState {
@@ -1000,23 +1162,24 @@ impl Workspace {
     /// The active Markdown tab's words and characters, and whether they are the selection's; for
     /// the UI checks.
     pub fn counts(&self, cx: &App) -> Option<(usize, usize, bool)> {
-        self.tabs.read(cx).active_counts(cx)
+        self.pane().read(cx).active_counts(cx)
     }
 
     /// Whether the editor and the preview show, and the editor's share of the width; for the UI checks.
     pub fn editor_panes(&self, cx: &App) -> (bool, bool, f32) {
-        self.tabs.read(cx).panes()
+        self.pane().read(cx).panes()
     }
 
     pub fn active_text(&self, cx: &App) -> Option<String> {
-        let tabs = self.tabs.read(cx);
+        let tabs = self.pane().read(cx);
         Some(tabs.active_tab()?.editor.read(cx).value().to_string())
     }
 
     /// Shows changed settings in this window's tabs and tree.
     fn apply_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.tabs
-            .update(cx, |tabs, cx| tabs.apply_settings(window, cx));
+        for side in self.sides() {
+            side.update(cx, |tabs, cx| tabs.apply_settings(window, cx));
+        }
         if let Some(panel) = &self.panel {
             panel.update(cx, |panel, cx| panel.apply_settings(cx));
         }
@@ -1059,13 +1222,13 @@ impl Workspace {
 
     /// The active tab's file, relative to the open folder.
     pub fn active_file(&self, cx: &App) -> Option<PathBuf> {
-        self.tabs.read(cx).active_tab().map(|t| t.path.clone())
+        self.pane().read(cx).active_tab().map(|t| t.path.clone())
     }
 
     /// What the status bar says in place of a path (a file that did not open as text); for the UI
     /// checks.
     pub fn tabs_message(&self, cx: &App) -> Option<String> {
-        self.tabs.read(cx).error.clone()
+        self.pane().read(cx).error.clone()
     }
 
     /// The open folder search's count line ("1 match in 1 file"); for the UI checks.
@@ -1102,8 +1265,21 @@ impl Workspace {
 
     /// Every tab's file, in tab order; for the UI checks.
     pub fn open_files(&self, cx: &App) -> Vec<PathBuf> {
-        let (tabs, _) = self.tabs.read(cx).session_tabs(cx);
-        tabs.into_iter().map(|tab| tab.path).collect()
+        self.sides()
+            .iter()
+            .flat_map(|side| side.read(cx).session_tabs(cx).0)
+            .map(|tab| tab.path)
+            .collect()
+    }
+
+    /// Each side's files, left then right (none while the editor is not split); for the UI checks.
+    pub fn split_files(&self, cx: &App) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        let files = |side: &Entity<EditorTabs>| -> Vec<PathBuf> {
+            let (tabs, _) = side.read(cx).session_tabs(cx);
+            tabs.into_iter().map(|tab| tab.path).collect()
+        };
+        let right = self.split.as_ref().map(files).unwrap_or_default();
+        (files(&self.tabs), right)
     }
 
     /// The window's first folder, if any.
@@ -1346,14 +1522,14 @@ impl Workspace {
             |this, _, event: &FinderEvent, window, cx| match event {
                 FinderEvent::Open(path) => {
                     this.close_overlay(false, window, cx);
-                    this.tabs
-                        .update(cx, |tabs, cx| tabs.open(path, false, window, cx));
+                    this.open_here(path, None, false, window, cx);
                     this.focus_editor_area(window, cx);
                 }
                 FinderEvent::GoToLine { line, column } => {
                     let (line, column) = (*line, *column);
                     this.close_overlay(true, window, cx);
-                    this.tabs
+                    this.pane()
+                        .clone()
                         .update(cx, |tabs, cx| tabs.go_to_line(line, column, window, cx));
                 }
                 FinderEvent::Dismiss => this.close_overlay(true, window, cx),
@@ -1429,8 +1605,7 @@ impl Workspace {
                 SearchEvent::Open { path, line } => {
                     this.close_overlay(false, window, cx);
                     let line = *line;
-                    this.tabs
-                        .update(cx, |tabs, cx| tabs.open_at(path, line, window, cx));
+                    this.open_here(path, Some(line), false, window, cx);
                     this.focus_editor_area(window, cx);
                 }
                 SearchEvent::Dismiss => this.close_overlay(true, window, cx),
@@ -1477,12 +1652,89 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The editor: one island, or two side by side while split, the gap between resizing them.
+    fn render_editors(&self, cx: &mut Context<Self>) -> Div {
+        let Some(right) = self.split.clone() else {
+            return self.editor_island(self.tabs.clone(), false, cx).flex_1();
+        };
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .on_drag_move(
+                cx.listener(|this, event: &DragMoveEvent<PaneResize>, _, cx| {
+                    let bounds = event.bounds;
+                    let share = (event.event.position.x - bounds.left()) / bounds.size.width;
+                    this.split_ratio = share.clamp(0.2, 0.8);
+                    cx.notify();
+                }),
+            )
+            .child(
+                self.editor_island(self.tabs.clone(), false, cx)
+                    .flex_none()
+                    .w(relative(self.split_ratio)),
+            )
+            .child(
+                div()
+                    .id("pane-resize")
+                    .flex_none()
+                    .w(z(size::ISLAND_GAP, cx))
+                    .h_full()
+                    .cursor_col_resize()
+                    .on_drag(PaneResize, |_, _, _, cx| cx.new(|_| EmptyView)),
+            )
+            .child(self.editor_island(right, true, cx).flex_1())
+    }
+
+    /// One side of the editor on its island; files dropped on it open there. A single editor
+    /// keeps the place over its right half where a dropped file splits it.
+    fn editor_island(&self, side: Entity<EditorTabs>, right: bool, cx: &mut Context<Self>) -> Div {
+        island(cx)
+            .min_w_0()
+            .flex()
+            .on_drop(cx.listener(move |this, items: &DraggedItems, window, cx| {
+                this.drop_into(right, &items.paths, window, cx)
+            }))
+            .on_drop(cx.listener(move |this, paths: &ExternalPaths, window, cx| {
+                this.drop_from_finder(right, paths.paths(), window, cx)
+            }))
+            .child(side)
+            .when(self.split.is_none(), |el| el.child(self.split_zone(cx)))
+            .child(island_corners(cx))
+    }
+
+    /// Over a single editor's right half: a file dropped here opens beside the others, splitting
+    /// the editor. It shows, tinted with an edge, only while something is dragged over it.
+    fn split_zone(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let p = theme::colors(cx);
+        let (tint, edge, width) = (c(p.accent).opacity(0.12), c(p.accent), z(2., cx));
+        div()
+            .id("split-zone")
+            .absolute()
+            .top_0()
+            .right_0()
+            .bottom_0()
+            .w(relative(0.5))
+            .drag_over::<DraggedItems>(move |style, _, _, _| {
+                style.bg(tint).border_l(width).border_color(edge)
+            })
+            .drag_over::<ExternalPaths>(move |style, _, _, _| {
+                style.bg(tint).border_l(width).border_color(edge)
+            })
+            .on_drop(cx.listener(|this, items: &DraggedItems, window, cx| {
+                this.drop_into(true, &items.paths, window, cx)
+            }))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.drop_into(true, paths.paths(), window, cx)
+            }))
+    }
+
     fn focus_editor(&mut self, _: &FocusEditor, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_editor_area(window, cx);
     }
 
     fn focus_editor_area(&self, window: &mut Window, cx: &mut App) {
-        let handle = self.tabs.read(cx).focus_handle(cx);
+        let handle = self.pane().read(cx).focus_handle(cx);
         handle.focus(window, cx);
     }
 
@@ -1493,7 +1745,7 @@ impl Workspace {
             let selection = self.panel.as_ref()?.read(cx).selection();
             return (!selection.is_empty()).then_some((selection, None));
         }
-        let tabs = self.tabs.read(cx);
+        let tabs = self.pane().read(cx);
         let tab = tabs.active_tab()?;
         Some((vec![tab.path.clone()], tabs.active_lines(cx)))
     }
@@ -1622,12 +1874,14 @@ impl Workspace {
     }
 
     fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
-        self.tabs
+        self.pane()
+            .clone()
             .update(cx, |tabs, cx| tabs.save_active(window, cx));
     }
 
     fn close_tab(&mut self, _: &CloseTab, window: &mut Window, cx: &mut Context<Self>) {
-        self.tabs
+        self.pane()
+            .clone()
             .update(cx, |tabs, cx| tabs.close_active(window, cx));
     }
 
@@ -1637,7 +1891,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.tabs
+        self.pane()
+            .clone()
             .update(cx, |tabs, cx| tabs.reopen_closed(window, cx));
     }
 
@@ -1708,7 +1963,7 @@ pub(crate) fn island_corners(cx: &App) -> impl IntoElement {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = theme::colors(cx);
-        let tabs = self.tabs.read(cx);
+        let tabs = self.pane().read(cx);
         let active = tabs.active_tab();
         let folders = self.folders(cx);
         let folder = folders.as_ref().map(|f| f.name().to_string());
@@ -1822,15 +2077,19 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &PrevTab, window, cx| {
-                this.tabs
+                this.pane()
+                    .clone()
                     .update(cx, |tabs, cx| tabs.activate_offset(-1, window, cx))
             }))
             .on_action(cx.listener(|this, _: &NextTab, window, cx| {
-                this.tabs
+                this.pane()
+                    .clone()
                     .update(cx, |tabs, cx| tabs.activate_offset(1, window, cx))
             }))
             .on_action(cx.listener(|this, _: &TogglePreview, _, cx| {
-                this.tabs.update(cx, |tabs, cx| tabs.toggle_preview(cx));
+                this.pane()
+                    .clone()
+                    .update(cx, |tabs, cx| tabs.toggle_preview(cx));
                 this.schedule_save(cx);
             }))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom_by(1, cx)))
@@ -1874,40 +2133,29 @@ impl Render for Workspace {
                                     )
                                 },
                             )
-                            .child(
-                                island(cx)
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .on_drop(cx.listener(
-                                        |this, items: &DraggedItems, window, cx| {
-                                            this.drop_on_editor(&items.paths, window, cx)
-                                        },
-                                    ))
-                                    .on_drop(cx.listener(
-                                        |this, paths: &ExternalPaths, window, cx| {
-                                            this.drop_from_finder(paths.paths(), window, cx)
-                                        },
-                                    ))
-                                    .map(|el| match self.panel {
-                                        Some(_) => el.child(self.tabs.clone()),
-                                        None => {
-                                            let this = cx.entity().downgrade();
-                                            el.child(empty_state::render(
-                                                &self.recent_shown(cx),
-                                                self.recent_selected,
-                                                move |index, _, cx| {
-                                                    let _ = this.update(cx, |this, cx| {
-                                                        this.open_recent(index, cx)
-                                                    });
-                                                },
-                                                window,
-                                                cx,
-                                            ))
-                                        }
-                                    })
-                                    .child(island_corners(cx)),
-                            ),
+                            .child(match self.panel {
+                                Some(_) => self.render_editors(cx).into_any_element(),
+                                None => {
+                                    let this = cx.entity().downgrade();
+                                    island(cx)
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .child(empty_state::render(
+                                            &self.recent_shown(cx),
+                                            self.recent_selected,
+                                            move |index, _, cx| {
+                                                let _ = this.update(cx, |this, cx| {
+                                                    this.open_recent(index, cx)
+                                                });
+                                            },
+                                            window,
+                                            cx,
+                                        ))
+                                        .child(island_corners(cx))
+                                        .into_any_element()
+                                }
+                            }),
                     )
                     .when_some(
                         self.terminal.as_ref().filter(|t| t.visible),

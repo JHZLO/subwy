@@ -35,6 +35,11 @@ pub struct WindowState {
     pub selected: Option<PathBuf>,
     pub tabs: Vec<TabState>,
     pub active_tab: Option<usize>,
+    /// The right side's tabs when the editor was split in two.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub split_tabs: Vec<TabState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub split_active: Option<usize>,
     pub tree_width: Option<f32>,
     pub preview: bool,
     /// The terminal's tabs when it had any. Without, a window opens its terminal as the settings
@@ -253,6 +258,12 @@ mod tests {
                         column: 0,
                     }],
                     active_tab: Some(0),
+                    split_tabs: vec![TabState {
+                        path: PathBuf::from("src/lib.rs"),
+                        line: 2,
+                        column: 0,
+                    }],
+                    split_active: Some(0),
                     ..Default::default()
                 },
             ],
@@ -278,6 +289,9 @@ mod tests {
         let json: serde_json::Value = serde_json::to_value(sample()).unwrap();
         assert_eq!(json["windows"][1]["root"], "/Users/me/code");
         assert_eq!(json["windows"][0]["tabs"][0]["line"], 11);
+        assert_eq!(json["windows"][1]["split_tabs"][0]["path"], "src/lib.rs");
+        // A window that was not split writes nothing of it.
+        assert!(json["windows"][0].get("split_tabs").is_none());
         assert_eq!(json["zoom"], 125);
         assert_eq!(json["recent"][0], "/Users/me/code");
         // Each window keeps only its own state.
