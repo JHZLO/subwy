@@ -2,9 +2,9 @@
 
 use std::{
     cmp::Ordering,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering::Relaxed},
     },
 };
@@ -27,32 +27,85 @@ pub struct FileIndex {
 
 /// Every file under `root` the finder offers: what the tree shows, minus the gitignored files.
 pub fn build(root: &Path) -> FileIndex {
-    build_with_limit(root, MAX_FILES)
+    build_with_limit(&Folders::single(root.to_path_buf()), MAX_FILES)
 }
 
 /// The finder's files across a window's folders: each folder's own, with its name in front when
 /// there are several (the paths the rest of subwy uses, see `folders`).
 pub fn build_folders(folders: &Folders) -> FileIndex {
-    if !folders.several() {
-        return build(folders.first());
-    }
-    let mut all = FileIndex::default();
-    for (root, key) in folders.roots().iter().zip(folders.keys()) {
-        let left = MAX_FILES.saturating_sub(all.paths.len());
-        if left == 0 {
-            all.capped = true;
-            break;
-        }
-        let index = build_with_limit(root, left);
-        all.capped |= index.capped;
-        all.paths
-            .extend(index.paths.into_iter().map(|path| format!("{key}/{path}")));
-    }
-    all.paths.sort_unstable_by(|a, b| compare_paths(a, b));
-    all
+    build_with_limit(folders, MAX_FILES)
 }
 
-fn build_with_limit(root: &Path, limit: usize) -> FileIndex {
+/// Every folder's own files go in before any checkout inside them (a folder with a `.git` file:
+/// a git worktree or submodule). Those are mostly copies of a repository the window already
+/// holds, and a folder of many worktrees filled `limit` alone, leaving the repository out.
+fn build_with_limit(folders: &Folders, limit: usize) -> FileIndex {
+    let mut index = FileIndex::default();
+    let several = folders.several();
+    let roots = folders.roots().iter().zip(folders.keys());
+    let mut later = Vec::new();
+    for (root, key) in roots.clone() {
+        let mut found = walk(root, limit - index.paths.len(), None);
+        later.push(std::mem::take(&mut found.checkouts));
+        index.add(found, several.then_some(key.as_str()));
+    }
+    for ((root, key), checkouts) in roots.zip(later) {
+        if !checkouts.is_empty() {
+            let found = walk(root, limit - index.paths.len(), Some(Arc::new(checkouts)));
+            index.add(found, several.then_some(key.as_str()));
+        }
+    }
+    index.paths.sort_unstable_by(|a, b| compare_paths(a, b));
+    index
+}
+
+impl FileIndex {
+    /// One folder's files, under `key` when the window has several.
+    fn add(&mut self, found: Walk, key: Option<&str>) {
+        self.capped |= found.capped;
+        match key {
+            Some(key) => self
+                .paths
+                .extend(found.paths.into_iter().map(|path| format!("{key}/{path}"))),
+            None => self.paths.extend(found.paths),
+        }
+    }
+}
+
+struct Walk {
+    /// Relative to the walked folder, unsorted.
+    paths: Vec<String>,
+    capped: bool,
+    /// The checkouts a first walk met and left for later.
+    checkouts: Vec<PathBuf>,
+}
+
+/// Lists up to `limit` files of `root`: its own, leaving out the checkouts it meets, or with
+/// `into` only those in the checkouts it names. Both walk from `root`, so the same ignore files
+/// apply either way.
+fn walk(root: &Path, limit: usize, into: Option<Arc<Vec<PathBuf>>>) -> Walk {
+    let checkouts = Arc::new(Mutex::new(Vec::new()));
+    let met = checkouts.clone();
+    let filter = move |entry: &ignore::DirEntry| {
+        if entry.file_name() == ".git" {
+            return false;
+        }
+        let path = entry.path();
+        if let Some(into) = &into {
+            // The way down to each checkout, and everything in it.
+            return into
+                .iter()
+                .any(|dir| path.starts_with(dir) || dir.starts_with(path));
+        }
+        let checkout = entry.depth() > 0
+            && entry.file_type().is_some_and(|t| t.is_dir())
+            && path.join(".git").is_file();
+        if checkout {
+            let mut met = met.lock().unwrap_or_else(|e| e.into_inner());
+            met.push(path.to_path_buf());
+        }
+        !checkout
+    };
     // The same rules as the tree (fs.rs): `.gitignore` files from `root` down and
     // `.git/info/exclude`, with or without a git repository, nothing from above `root`
     // or from the global git config. Hidden files stay; the tree shows them too.
@@ -66,7 +119,7 @@ fn build_with_limit(root: &Path, limit: usize) -> FileIndex {
         .require_git(false)
         // The tree opens symlinked folders; the walker skips the ones that loop.
         .follow_links(true)
-        .filter_entry(|entry| entry.file_name() != ".git")
+        .filter_entry(filter)
         // In parallel: following links costs a stat per entry, and 90k files then take
         // about a third of the time they take on one thread (measured on ~/.cargo/registry).
         .build_parallel();
@@ -99,11 +152,11 @@ fn build_with_limit(root: &Path, limit: usize) -> FileIndex {
             WalkState::Continue
         })
     });
-    let mut paths = paths.into_inner().unwrap_or_else(|e| e.into_inner());
-    paths.sort_unstable_by(|a, b| compare_paths(a, b));
-    FileIndex {
-        paths,
+    let checkouts = std::mem::take(&mut *checkouts.lock().unwrap_or_else(|e| e.into_inner()));
+    Walk {
+        paths: paths.into_inner().unwrap_or_else(|e| e.into_inner()),
         capped: capped.into_inner(),
+        checkouts,
     }
 }
 
@@ -248,12 +301,48 @@ mod tests {
         for i in 0..5 {
             write(root.path(), &format!("f{i}.md"));
         }
-        let index = build_with_limit(root.path(), 3);
+        let folders = Folders::single(root.path().to_path_buf());
+        let index = build_with_limit(&folders, 3);
         assert_eq!(index.paths.len(), 3);
         assert!(index.capped);
-        let index = build_with_limit(root.path(), 5);
+        let index = build_with_limit(&folders, 5);
         assert_eq!(index.paths.len(), 5);
         assert!(!index.capped);
+    }
+
+    #[test]
+    fn worktrees_wait_until_every_folder_is_listed() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        write(a.path(), "own.md");
+        // Two linked worktrees: a `.git` file, not a folder.
+        for name in ["one", "two"] {
+            write(a.path(), &format!("copies/{name}/.git"));
+            write(a.path(), &format!("copies/{name}/{name}.md"));
+        }
+        write(b.path(), "b.md");
+        let folders = Folders::new(vec![a.path().to_path_buf(), b.path().to_path_buf()]);
+        let (ka, kb) = (&folders.keys()[0], &folders.keys()[1]);
+
+        // Room for one worktree file: both folders' own files are in all the same.
+        let index = build_with_limit(&folders, 3);
+        assert!(index.capped);
+        assert_eq!(index.paths.len(), 3);
+        assert!(index.paths.contains(&format!("{ka}/own.md")));
+        assert!(index.paths.contains(&format!("{kb}/b.md")));
+
+        let mut want = vec![
+            format!("{ka}/copies/one/one.md"),
+            format!("{ka}/copies/two/two.md"),
+            format!("{ka}/own.md"),
+            format!("{kb}/b.md"),
+        ];
+        want.sort_by(|x, y| compare_paths(x, y));
+        let index = build_with_limit(&folders, 10);
+        assert_eq!(index.paths, want);
+        assert!(!index.capped);
+        // A window opened on a worktree lists it as its own.
+        assert_eq!(build(&a.path().join("copies/one")).paths, ["one.md"]);
     }
 
     #[test]
