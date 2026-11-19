@@ -1,7 +1,7 @@
 //! Open files as tabs, each over one gpui-kit editor: the pass-through tab, the paper sheet, saving.
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     io,
     ops::Range,
     path::{Path, PathBuf},
@@ -152,6 +152,9 @@ pub struct EditorTabs {
     /// The last words and characters counted, and of what (editor, edits, length, selection), so
     /// the status bar does not count a long text again on every frame.
     counted: RefCell<Option<(CountedOf, (usize, usize))>>,
+    /// The line the outline last marked its section by. The editor learns what it shows while it
+    /// paints, a frame after it scrolled, so after each frame this is checked again.
+    outline_line: Cell<Option<u32>>,
     preview: Option<Entity<Preview>>,
     /// IntelliJ's Preview only: the preview takes the whole pane for a Markdown tab.
     preview_only: bool,
@@ -314,6 +317,7 @@ impl EditorTabs {
             last_lines: None,
             last_selection: 0..0,
             counted: RefCell::default(),
+            outline_line: Cell::default(),
             preview: None,
             preview_only: false,
             split: 0.5,
@@ -346,8 +350,19 @@ impl EditorTabs {
         cx.notify();
     }
 
+    /// A Markdown tab in the editor view has the outline (the preview shows the text itself).
+    fn shows_outline(&self, tab: &Tab, cx: &App) -> bool {
+        tab.is_markdown() && crate::settings(cx).outline && self.preview.is_none()
+    }
+
+    /// Which heading's section the outline marks in the active tab; for the UI checks.
+    pub fn outline_section(&self, cx: &App) -> Option<usize> {
+        let state = self.active_tab()?.editor.read(cx);
+        markdown::section_at(&markdown::outline(&state.value()), outline_line(state))
+    }
+
     /// The outline of a Markdown tab with two headings or more: each heading a station on the
-    /// file's line, the section holding the cursor marked, the way to it drawn in the line's color.
+    /// file's line, the section on screen marked, the way to it drawn in the line's color.
     /// A click on a station puts the cursor on its heading.
     fn render_outline(&self, tab: &Tab, cx: &mut Context<Self>) -> Option<AnyElement> {
         const ROW: f32 = 30.;
@@ -355,13 +370,14 @@ impl EditorTabs {
         let p = theme::colors(cx);
         let state = tab.editor.read(cx);
         let text = state.value();
+        let lines = state.text().lines_len().max(1) as u32;
+        let at = outline_line(state);
+        self.outline_line.set(Some(at));
         let headings = markdown::outline(&text);
         if headings.len() < 2 {
             return None;
         }
-        let cursor = state.cursor_position().line;
-        let lines = text.lines().count().max(1) as u32;
-        let current = markdown::section_at(&headings, cursor);
+        let current = markdown::section_at(&headings, at);
         let line_color = c(self.station_color(&tab.path, p));
         let last = headings.len() - 1;
         let reached = current.unwrap_or(0);
@@ -438,16 +454,6 @@ impl EditorTabs {
                         .text_ellipsis()
                         .child(heading.title),
                 )
-                .when(here, |el| {
-                    el.child(
-                        div()
-                            .flex_none()
-                            .text_size(z(11., cx))
-                            .font_weight(FontWeight::NORMAL)
-                            .text_color(c(p.sub))
-                            .child("You are here"),
-                    )
-                })
                 .when(index == last && !here, |el| {
                     el.child(
                         div()
@@ -460,6 +466,9 @@ impl EditorTabs {
                 })
                 .on_click(cx.listener(move |_, _: &ClickEvent, window, cx| {
                     editor.update(cx, |state, cx| {
+                        // From the end back up, so the view stops with the heading near its top,
+                        // where the outline reads the section, not at its bottom edge.
+                        state.set_cursor_position(Position::new(lines - 1, 0), window, cx);
                         state.set_cursor_position(Position::new(line, 0), window, cx)
                     });
                     editor.read(cx).focus_handle(cx).focus(window, cx);
@@ -486,7 +495,7 @@ impl EditorTabs {
                         .text_size(z(11., cx))
                         .text_color(c(p.sub))
                         .child(div().font_weight(FontWeight::SEMIBOLD).child("OUTLINE"))
-                        .child(format!("{}%", (cursor + 1).min(lines) * 100 / lines)),
+                        .child(format!("{}%", (at + 1).min(lines) * 100 / lines)),
                 )
                 .child(
                     div()
@@ -798,7 +807,7 @@ impl EditorTabs {
                         this.last_lines = lines;
                         this.last_selection = selection;
                         cx.emit(TabsChanged);
-                        // The outline's station follows the cursor's line.
+                        // In a file on one screen the outline's station follows the cursor's line.
                         cx.notify();
                     }
                 }
@@ -2348,9 +2357,40 @@ fn folded_corner(size: Pixels, color: Hsla) -> impl IntoElement {
     .size(size)
 }
 
+/// How far down the screen a heading still counts as the top: the editor keeps a caret it jumps
+/// to this many lines from the edge.
+const OUTLINE_LEAD: usize = 3;
+
+/// The line the outline marks its section by, so it follows the scroll: a few lines down from the
+/// top of the screen, or the last line once the end is on screen. A file that fits on one screen
+/// does not scroll; there it is the cursor's line.
+fn outline_line(state: &EditorState) -> u32 {
+    let lines = state.text().lines_len().max(1);
+    let cursor = state.cursor_position().line;
+    match state.visible_row_range() {
+        Some(rows) if rows.end >= lines && rows.start == 0 => cursor,
+        Some(rows) if rows.end >= lines => (lines - 1) as u32,
+        Some(rows) => (rows.start + OUTLINE_LEAD).min(lines - 1) as u32,
+        None => cursor,
+    }
+}
+
 impl Render for EditorTabs {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = theme::colors(cx);
+        if self
+            .active_tab()
+            .is_some_and(|tab| self.shows_outline(tab, cx))
+        {
+            cx.defer_in(window, |this, _, cx| {
+                let line = this
+                    .active_tab()
+                    .map(|tab| outline_line(tab.editor.read(cx)));
+                if line != this.outline_line.get() {
+                    cx.notify();
+                }
+            });
+        }
         // In a column under the banner, so it takes the height left rather than all of it.
         let body = div()
             .flex_1()
@@ -2392,7 +2432,8 @@ impl Render for EditorTabs {
                 if tab.is_markdown() {
                     // The outline beside the text, in the editor view only: the preview shows the
                     // text itself.
-                    let outline = (crate::settings(cx).outline && self.preview.is_none())
+                    let outline = self
+                        .shows_outline(tab, cx)
                         .then(|| self.render_outline(tab, cx))
                         .flatten();
                     let editor = div()

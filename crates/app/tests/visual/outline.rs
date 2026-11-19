@@ -1,7 +1,10 @@
-//! The outline beside a Markdown file: its headings as stations, the one holding the cursor marked,
-//! and a click that takes the cursor to a heading.
+//! The outline beside a Markdown file: its headings as stations, the one on screen marked, and a
+//! click that takes the cursor to a heading.
 
-use gpui_kit::{AnyWindowHandle, Modifiers, point, px};
+use gpui_kit::{
+    AnyWindowHandle, Modifiers, ScrollDelta, ScrollEvent, ScrollSource, TouchPhase, point, px,
+    test::TestWindowExt as _,
+};
 
 use crate::check::{Check, fixture};
 
@@ -48,6 +51,87 @@ pub fn run(check: &mut Check) {
     check.update_workspace(window, |_, _, cx| {
         subwy::update_settings(cx, |s| s.outline = true)
     });
+    follows_the_scroll(check);
+}
+
+/// In a file longer than the screen the marked station follows the scroll, not the cursor; with
+/// the end of the file on screen it is the last; a click brings its heading up to be the marked one.
+fn follows_the_scroll(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let body = "text\n".repeat(40);
+    let text: String = (1..=6)
+        .map(|n| format!("## Part {n}\n\n{body}\n"))
+        .collect();
+    std::fs::write(dir.path().join("long.md"), text).expect("write");
+    let window = check.open(Some(dir.path()));
+    // Rows: the folder, long.md.
+    check.keys(window, "down down enter");
+    settle(check, window);
+    let section = |check: &mut Check| check.workspace(window, |w, cx| w.outline_section(cx));
+    let top = section(check);
+    check.expect_eq(
+        "outline: the top of a long file marks the first station",
+        top,
+        Some(0),
+    );
+
+    let (width, _) = check.window_size(window);
+    let editor = point(px(width - 6. - 230. - 150.), px(300.));
+    for _ in 0..30 {
+        check.cx.simulate_event(
+            window,
+            ScrollEvent {
+                position: editor,
+                delta: ScrollDelta::Pixels(point(px(0.), px(-40.))),
+                modifiers: Modifiers::default(),
+                touch_phase: TouchPhase::Moved,
+                source: ScrollSource::Pointer,
+            },
+        );
+    }
+    settle(check, window);
+    // The cursor is still on the first line.
+    let scrolled = section(check);
+    check.shot(window, "outline-4-scrolled");
+    check.expect_eq(
+        "outline: scrolling down moves the marked station on",
+        scrolled.is_some_and(|at| at > 0),
+        true,
+    );
+
+    check.keys(window, "cmd-down");
+    settle(check, window);
+    let end = section(check);
+    check.expect_eq(
+        "outline: the end of the file on screen marks the last station",
+        end,
+        Some(5),
+    );
+
+    let x = station_x(check, window);
+    click(check, window, x, station_y(2));
+    settle(check, window);
+    let clicked = section(check);
+    check.expect_eq(
+        "outline: a clicked station is the marked one",
+        clicked,
+        Some(2),
+    );
+    check
+        .cx
+        .update_window(window, |_, window, _| window.remove_window())
+        .expect("window");
+}
+
+/// The editor learns which lines it shows while it paints; draw a few frames.
+fn settle(check: &mut Check, window: AnyWindowHandle) {
+    for _ in 0..4 {
+        check
+            .cx
+            .update_window(window, |_, window, cx| window.render_frame(cx))
+            .expect("window");
+        check.cx.run_until_parked();
+    }
 }
 
 fn click(check: &mut Check, window: AnyWindowHandle, x: f32, y: f32) {

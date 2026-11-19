@@ -1241,6 +1241,11 @@ impl Workspace {
         self.pane().read(cx).active_tab().map(|t| t.path.clone())
     }
 
+    /// Which heading's section the outline marks; for the UI checks.
+    pub fn outline_section(&self, cx: &App) -> Option<usize> {
+        self.pane().read(cx).outline_section(cx)
+    }
+
     /// What the status bar says in place of a path (a file that did not open as text); for the UI
     /// checks.
     pub fn tabs_message(&self, cx: &App) -> Option<String> {
