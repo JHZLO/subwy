@@ -56,6 +56,8 @@ pub struct WindowState {
 pub struct TerminalState {
     /// Each tab's folder, where `cd` had taken its shell, in tab order.
     pub tabs: Vec<PathBuf>,
+    /// The name each tab was given, empty for none, in tab order.
+    pub names: Vec<String>,
     /// The tab in front.
     pub active: usize,
     /// Shown, or hidden (Alt+F12) with its shells running.
@@ -161,6 +163,7 @@ mod tests {
             root: Some(PathBuf::from("/a")),
             terminal: Some(TerminalState {
                 tabs: vec![PathBuf::from("/a/docs"), PathBuf::from("/tmp")],
+                names: vec![String::new(), "build".to_string()],
                 active: 1,
                 visible: true,
             }),

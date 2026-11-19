@@ -631,8 +631,13 @@ impl Workspace {
         // the tree.
         match saved.as_ref().and_then(|s| s.terminal.as_ref()) {
             Some(state) if self.terminal.is_none() => {
-                let started =
-                    self.start_terminal(&state.folders(folders.first()), state.active, window, cx);
+                let started = self.start_terminal(
+                    &state.folders(folders.first()),
+                    &state.names,
+                    state.active,
+                    window,
+                    cx,
+                );
                 if let Some(terminal) = self.terminal.as_mut().filter(|_| started) {
                     terminal.visible = state.visible;
                 }
@@ -1098,9 +1103,10 @@ impl Workspace {
             None => (Vec::new(), None),
         };
         saved.terminal = self.terminal.as_ref().map(|terminal| {
-            let (tabs, active) = terminal.view.read(cx).session(cx);
+            let (tabs, names, active) = terminal.view.read(cx).session(cx);
             session::TerminalState {
                 tabs,
+                names,
                 active,
                 visible: terminal.visible,
             }
@@ -1320,6 +1326,13 @@ impl Workspace {
         self.terminal.as_ref().map_or(0, |t| t.view.read(cx).len())
     }
 
+    /// Each terminal tab's title; for the UI checks.
+    pub fn terminal_titles(&self, cx: &App) -> Vec<String> {
+        self.terminal
+            .as_ref()
+            .map_or_else(Vec::new, |t| t.view.read(cx).titles())
+    }
+
     fn terminal_focused(&self, window: &Window, cx: &App) -> bool {
         self.terminal
             .as_ref()
@@ -1387,7 +1400,7 @@ impl Workspace {
     fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<&Terminal> {
         if self.terminal.is_none() {
             let root = self.root(cx)?;
-            if !self.start_terminal(&[root], 0, window, cx) {
+            if !self.start_terminal(&[root], &[], 0, window, cx) {
                 return None;
             }
         }
@@ -1396,11 +1409,12 @@ impl Workspace {
         Some(terminal)
     }
 
-    /// Starts the terminal, hidden, with a tab in each of `folders` and `active` in front. False
-    /// when no folder is open or no shell could start.
+    /// Starts the terminal, hidden, with a tab in each of `folders`, named as in `names`, and
+    /// `active` in front. False when no folder is open or no shell could start.
     fn start_terminal(
         &mut self,
         folders: &[PathBuf],
+        names: &[String],
         active: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1409,7 +1423,9 @@ impl Workspace {
             return false;
         };
         let view = cx.new(|_| TerminalTabs::new(root));
-        if !view.update(cx, |tabs, cx| tabs.restore(folders, active, window, cx)) {
+        if !view.update(cx, |tabs, cx| {
+            tabs.restore(folders, names, active, window, cx)
+        }) {
             return false;
         }
         let subscription = cx.subscribe_in(

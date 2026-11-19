@@ -87,6 +87,7 @@ actions!(
         CloseTerminal,
         PrevTerminal,
         NextTerminal,
+        RenameTerminal,
     ]
 );
 
@@ -304,6 +305,8 @@ fn own_keys() -> Vec<Own> {
         own("cmd-}", NextTerminal, Some(TERMINAL)),
         own("cmd-shift-left", PrevTerminal, Some(TERMINAL)),
         own("cmd-shift-right", NextTerminal, Some(TERMINAL)),
+        // IntelliJ's Rename key, for the tab in front (its Rename Session).
+        own("shift-f6", RenameTerminal, Some(TERMINAL)),
     ]
 }
 

@@ -80,6 +80,7 @@ pub fn run(check: &mut Check) {
     check.keys(window, "e c h o space t w o enter");
     let two = wait_for(check, window, |lines| lines.iter().any(|l| l == "two"));
     check.expect_eq("keys go to the tab in front", two, true);
+    rename(check, window);
     check.shot(window, "terminal-2-tabs");
     // A real Cmd+Shift+[ arrives as Cmd+{.
     check.keys(window, "cmd-{");
@@ -104,8 +105,45 @@ pub fn run(check: &mut Check) {
     reopen(check);
 }
 
+/// Shift+F6 names the tab in front (its title starts selected, so typing replaces it), and the
+/// keyboard goes back to the shell. Escape leaves the name; an empty one gives back the number.
+fn rename(check: &mut Check, window: AnyWindowHandle) {
+    let titles = |check: &mut Check| check.workspace(window, |w, cx| w.terminal_titles(cx));
+    check.keys(window, "shift-f6");
+    check.cx.simulate_input(window, "build");
+    check.shot(window, "terminal-rename");
+    check.keys(window, "enter");
+    let named = titles(check);
+    check.expect_eq(
+        "shift-f6 renames the terminal tab in front",
+        named,
+        vec!["Local".to_string(), "build".to_string()],
+    );
+    check.keys(window, "e c h o space b a c k enter");
+    let back = wait_for(check, window, |lines| lines.iter().any(|l| l == "back"));
+    check.expect_eq("after the rename, keys go to the shell", back, true);
+
+    check.keys(window, "shift-f6");
+    check.cx.simulate_input(window, "nope");
+    check.keys(window, "escape");
+    let kept = titles(check);
+    check.expect_eq(
+        "escape leaves the tab's name",
+        kept,
+        vec!["Local".to_string(), "build".to_string()],
+    );
+    check.keys(window, "shift-f6 backspace enter");
+    let numbered = titles(check);
+    check.expect_eq(
+        "an empty name gives the tab its number back",
+        numbered,
+        vec!["Local".to_string(), "Local (2)".to_string()],
+    );
+}
+
 /// Closed and opened again, a folder's terminal comes back: its tabs, each in the folder `cd`
-/// took its shell to, the one in front, shown or hidden, and its height.
+/// took its shell to and with the name it was given, the one in front, shown or hidden, and its
+/// height.
 fn reopen(check: &mut Check) {
     let fixture = fixture();
     let root = fixture.path().canonicalize().expect("root");
@@ -123,6 +161,9 @@ fn reopen(check: &mut Check) {
     wait_for(check, window, |lines| {
         lines.iter().any(|l| Path::new(l) == src)
     });
+    check.keys(window, "shift-f6");
+    check.cx.simulate_input(window, "build");
+    check.keys(window, "enter");
     // A move in the tree saves the session a moment later.
     check.keys(window, "cmd-1 down");
     check.cx.advance_clock(Duration::from_secs(2));
@@ -134,6 +175,7 @@ fn reopen(check: &mut Check) {
         state,
         Some(TerminalState {
             tabs: vec![root.join("docs"), src.clone()],
+            names: vec![String::new(), "build".to_string()],
             active: 1,
             visible: true,
         }),
@@ -158,6 +200,12 @@ fn reopen(check: &mut Check) {
     let window = check.open(Some(&root));
     let tabs = check.workspace(window, |w, cx| w.terminal_tabs(cx));
     check.expect_eq("both terminal tabs come back", tabs, 2);
+    let titles = check.workspace(window, |w, cx| w.terminal_titles(cx));
+    check.expect_eq(
+        "a renamed tab comes back with its name",
+        titles,
+        vec!["Local".to_string(), "build".to_string()],
+    );
     let hidden = check.workspace(window, |w, cx| w.terminal_lines(cx).is_none());
     check.expect_eq("a hidden terminal comes back hidden", hidden, true);
     let height = check.workspace(window, |w, cx| w.island_sizes(cx).1);

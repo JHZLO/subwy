@@ -1,13 +1,15 @@
 //! The terminal island's tabs, as in IntelliJ's Terminal: several shells in the open folder, one
 //! shown at a time. Cmd+T adds one (anywhere in the window), Cmd+W closes the one in front,
-//! Cmd+Shift+[ and ] step between them, and a shell that exits takes its tab with it.
+//! Cmd+Shift+[ and ] step between them, Shift+F6 or a double click renames one, and a shell that
+//! exits takes its tab with it.
 
 use std::path::{Path, PathBuf};
 
+use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::{
-    keymap::{CloseTerminal, NextTerminal, PrevTerminal},
+    keymap::{CloseTerminal, NextTerminal, PrevTerminal, RenameTerminal},
     terminal_panel::{TerminalEvent, TerminalPanel},
     theme::{self, c, size, z},
 };
@@ -16,16 +18,29 @@ struct Tab {
     view: Entity<TerminalPanel>,
     /// Names the tab: 1 is "Local", n is "Local (n)". A closed tab's number is free again.
     number: usize,
+    /// The name it was given instead.
+    name: Option<String>,
     _subscription: Subscription,
 }
 
 impl Tab {
     fn title(&self) -> String {
-        match self.number {
-            1 => "Local".to_string(),
-            n => format!("Local ({n})"),
+        match (&self.name, self.number) {
+            (Some(name), _) => name.clone(),
+            (None, 1) => "Local".to_string(),
+            (None, n) => format!("Local ({n})"),
         }
     }
+}
+
+/// The name input in a tab, at 100% zoom.
+const RENAME_WIDTH: f32 = 140.;
+
+/// A tab's new name being typed in its place.
+struct Renaming {
+    number: usize,
+    input: Entity<InputState>,
+    _subscription: Subscription,
 }
 
 pub enum TerminalTabsEvent {
@@ -40,6 +55,7 @@ pub struct TerminalTabs {
     cwd: PathBuf,
     tabs: Vec<Tab>,
     active: usize,
+    renaming: Option<Renaming>,
 }
 
 impl EventEmitter<TerminalTabsEvent> for TerminalTabs {}
@@ -51,6 +67,7 @@ impl TerminalTabs {
             cwd,
             tabs: Vec::new(),
             active: 0,
+            renaming: None,
         }
     }
 
@@ -91,6 +108,7 @@ impl TerminalTabs {
         self.tabs.push(Tab {
             view,
             number,
+            name: None,
             _subscription: subscription,
         });
         self.active = self.tabs.len() - 1;
@@ -98,30 +116,46 @@ impl TerminalTabs {
         true
     }
 
-    /// Starts a tab in each of `folders` (the session's), with `active` in front. False when no
-    /// shell could start.
+    /// Starts a tab in each of `folders` (the session's), named as in `names` (empty for its
+    /// number), with `active` in front. False when no shell could start.
     pub fn restore(
         &mut self,
         folders: &[PathBuf],
+        names: &[String],
         active: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        for folder in folders {
-            self.add_in(folder, window, cx);
+        for (index, folder) in folders.iter().enumerate() {
+            if self.add_in(folder, window, cx)
+                && let Some(tab) = self.tabs.last_mut()
+            {
+                tab.name = names.get(index).filter(|name| !name.is_empty()).cloned();
+            }
         }
         self.active = active.min(self.tabs.len().saturating_sub(1));
         !self.tabs.is_empty()
     }
 
-    /// Each tab's folder now, in order, and the tab in front: what the session keeps.
-    pub fn session(&self, cx: &App) -> (Vec<PathBuf>, usize) {
+    /// Each tab's folder now and the name it was given (empty for none), in order, and the tab in
+    /// front: what the session keeps.
+    pub fn session(&self, cx: &App) -> (Vec<PathBuf>, Vec<String>, usize) {
         let folders = self
             .tabs
             .iter()
             .map(|tab| tab.view.read(cx).cwd().unwrap_or_else(|| self.cwd.clone()))
             .collect();
-        (folders, self.active)
+        let names = self
+            .tabs
+            .iter()
+            .map(|tab| tab.name.clone().unwrap_or_default())
+            .collect();
+        (folders, names, self.active)
+    }
+
+    /// Each tab's title, in order; for the UI checks.
+    pub fn titles(&self) -> Vec<String> {
+        self.tabs.iter().map(Tab::title).collect()
     }
 
     /// Where the keyboard goes for the terminal: the tab in front.
@@ -162,7 +196,15 @@ impl TerminalTabs {
     /// keyboard if the closed one had it.
     fn close(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let had_focus = self.contains_focused(window, cx);
-        self.tabs.remove(index);
+        let closed = self.tabs.remove(index);
+        // A new tab could take its number, and with it the input.
+        if self
+            .renaming
+            .as_ref()
+            .is_some_and(|r| r.number == closed.number)
+        {
+            self.renaming = None;
+        }
         if self.tabs.is_empty() {
             cx.emit(TerminalTabsEvent::Empty { had_focus });
             return;
@@ -191,6 +233,53 @@ impl TerminalTabs {
         }
     }
 
+    /// The tab's title becomes an input, all selected (IntelliJ's Rename Session).
+    fn start_rename(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(index) else {
+            return;
+        };
+        let title = tab.title();
+        let input = cx.new(|cx| InputState::new(window, cx));
+        input.update(cx, |state, cx| {
+            state.set_value(title.clone(), window, cx);
+            state.set_selected_range(0..title.len(), cx);
+            state.focus(window, cx);
+        });
+        let subscription = cx.subscribe_in(
+            &input,
+            window,
+            |this, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => {
+                    this.end_rename(true, cx);
+                    this.focus_active(window, cx);
+                }
+                // A click elsewhere leaves the name as it was, as the tree's rename does.
+                InputEvent::Blur => this.end_rename(false, cx),
+                _ => {}
+            },
+        );
+        self.renaming = Some(Renaming {
+            number: tab.number,
+            input,
+            _subscription: subscription,
+        });
+        cx.notify();
+    }
+
+    /// With `keep`, the tab takes the typed name; an empty one gives it back its number.
+    fn end_rename(&mut self, keep: bool, cx: &mut Context<Self>) {
+        let Some(renaming) = self.renaming.take() else {
+            return;
+        };
+        if keep {
+            let typed = renaming.input.read(cx).value().trim().to_string();
+            if let Some(tab) = self.tabs.iter_mut().find(|t| t.number == renaming.number) {
+                tab.name = Some(typed).filter(|name| !name.is_empty());
+            }
+        }
+        cx.notify();
+    }
+
     fn focus_active(&self, window: &mut Window, cx: &mut App) {
         if let Some(handle) = self.focus_handle(cx) {
             handle.focus(window, cx);
@@ -217,7 +306,40 @@ impl TerminalTabs {
                     .pr(z(6., cx))
                     .text_color(c(if active { p.ink } else { p.sub }))
                     .when(!active, |el| el.hover(|style| style.bg(c(p.hover))))
-                    .child(tab.title())
+                    .map(
+                        |el| match self.renaming.as_ref().filter(|r| r.number == tab.number) {
+                            Some(renaming) => el.child(
+                                div()
+                                    .w(z(RENAME_WIDTH, cx))
+                                    .h(z(20., cx))
+                                    .overflow_hidden()
+                                    .rounded(z(4., cx))
+                                    .border_1()
+                                    .border_color(c(p.line))
+                                    .bg(c(p.paper))
+                                    .text_color(c(p.ink))
+                                    // A click inside stays there; the tab's click would give
+                                    // the shell the keyboard.
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_action(cx.listener(|this, _: &Escape, window, cx| {
+                                        this.end_rename(false, cx);
+                                        this.focus_active(window, cx);
+                                    }))
+                                    .child(
+                                        Input::new(&renaming.input)
+                                            .appearance(false)
+                                            .size_full()
+                                            .px(z(4., cx))
+                                            .py_0()
+                                            .text_size(z(12.5, cx))
+                                            .line_height(z(18., cx)),
+                                    ),
+                            ),
+                            None => el.child(tab.title()),
+                        },
+                    )
                     .child(
                         div()
                             .id(("terminal-close", tab.number))
@@ -248,9 +370,13 @@ impl TerminalTabs {
                                 .bg(c(p.ink)),
                         )
                     })
-                    .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
-                        if index < this.tabs.len() {
-                            this.activate(index, window, cx);
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+                        if index >= this.tabs.len() {
+                            return;
+                        }
+                        match event.click_count() {
+                            2 => this.start_rename(index, window, cx),
+                            _ => this.activate(index, window, cx),
                         }
                     }))
             })
@@ -298,6 +424,9 @@ impl Render for TerminalTabs {
             }))
             .on_action(cx.listener(|this, _: &PrevTerminal, window, cx| this.step(-1, window, cx)))
             .on_action(cx.listener(|this, _: &NextTerminal, window, cx| this.step(1, window, cx)))
+            .on_action(cx.listener(|this, _: &RenameTerminal, window, cx| {
+                this.start_rename(this.active, window, cx)
+            }))
             .child(self.render_tab_bar(cx))
             .children(front.map(|view| div().flex_1().min_h_0().child(view)))
     }
