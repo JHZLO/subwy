@@ -29,6 +29,8 @@ actions!(
         Quit,
         ToggleFinder,
         RecentFiles,
+        Back,
+        Forward,
         RevealInFinder,
         ToggleSearch,
         NewWindow,
@@ -231,6 +233,12 @@ fn own_keys() -> Vec<Own> {
         // also take two Shift-clicks.
         own("cmd-shift-o", ToggleFinder, ws),
         own("cmd-e", RecentFiles, ws),
+        own("cmd-[", Back, ws),
+        own("cmd-]", Forward, ws),
+        // gpui-kit's editor takes these to outdent and indent, which IntelliJ does with Tab and
+        // Shift+Tab; bound again there, Back and Forward win.
+        own("cmd-[", Back, Some(EDITOR_INPUT)),
+        own("cmd-]", Forward, Some(EDITOR_INPUT)),
         own("cmd-shift-f", ToggleSearch, ws),
         // gpui-kit binds cmd-shift-f to replace inside its editor ("Input"), which would win there; the
         // folder search takes it, and replace moves to cmd-r as in IntelliJ.

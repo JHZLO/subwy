@@ -13,6 +13,7 @@ mod markdown;
 mod markdown_view;
 mod outline;
 mod phase1;
+mod places;
 mod preview_sync;
 mod saving;
 mod search;
@@ -80,6 +81,7 @@ fn main() {
     start::run(&mut check);
     saving::run(&mut check);
     tabs::run(&mut check);
+    places::run(&mut check);
 
     if check.failures.is_empty() {
         println!("visual checks passed; screenshots in target/visual/");

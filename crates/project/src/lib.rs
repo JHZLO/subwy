@@ -11,6 +11,7 @@ pub mod markdown;
 pub mod nav;
 pub mod network;
 pub mod paths;
+pub mod places;
 pub mod search;
 pub mod session;
 pub mod settings;

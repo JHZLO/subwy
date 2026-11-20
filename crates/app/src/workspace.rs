@@ -13,19 +13,21 @@ use subwy_project::{
     folders::Folders,
     index::{self, FileIndex},
     network::{Network, Way},
-    paths, session, watch,
+    paths,
+    places::{Place, Places},
+    session, watch,
 };
 
 use crate::{
-    editor_tabs::{CodeCopied, EditorTabs, TabsChanged},
+    editor_tabs::{CodeCopied, EditorTabs, Jumping, TabsChanged},
     empty_state,
     finder::{self, Finder, FinderEvent},
     keymap::{
-        CloseSettings, CloseTab, Collapse, CopyFileName, CopyPath, CopyRelativePath, Expand,
-        FindBacklinks, FocusEditor, FocusTree, GoToLine, NewTerminal, NewWindow, NextTab, Open,
-        OpenFolder, OpenSettings, PrevTab, Quit, RecentFiles, ReopenClosedTab, RevealInFinder,
-        Save, SelectNext, SelectPrev, ToggleFinder, TogglePreview, ToggleSearch, ToggleTerminal,
-        WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
+        Back, CloseSettings, CloseTab, Collapse, CopyFileName, CopyPath, CopyRelativePath, Expand,
+        FindBacklinks, FocusEditor, FocusTree, Forward, GoToLine, NewTerminal, NewWindow, NextTab,
+        Open, OpenFolder, OpenSettings, PrevTab, Quit, RecentFiles, ReopenClosedTab,
+        RevealInFinder, Save, SelectNext, SelectPrev, ToggleFinder, TogglePreview, ToggleSearch,
+        ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
     },
     project_panel::{DraggedItems, FileEvent, PanelEvent, ProjectPanel, ResizeDrag},
     search_panel::{self, SearchEvent, SearchPanel},
@@ -117,6 +119,8 @@ pub struct Workspace {
     followed: Option<PathBuf>,
     /// The files that were active, latest first: what Cmd+E lists.
     recent_files: Vec<PathBuf>,
+    /// Where the caret jumped from: what Back (Cmd+[) and Forward (Cmd+]) go through.
+    places: Places,
     double_shift: DoubleShift,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -453,6 +457,7 @@ impl Workspace {
             window: handle,
             followed: None,
             recent_files: Vec::new(),
+            places: Places::default(),
             double_shift: DoubleShift::default(),
             focus_handle,
             _subscriptions: subscriptions,
@@ -639,6 +644,7 @@ impl Workspace {
         self.panel = Some(panel.clone());
         self.followed = None;
         self.recent_files.clear();
+        self.places = Places::default();
         self.recent_selected = 0;
         // What the Window menu and the Dock list this window as.
         window.set_window_title(folders.name());
@@ -751,6 +757,7 @@ impl Workspace {
             cx.subscribe(&side, |this, _, _: &TabsChanged, cx| {
                 this.close_empty_side(cx);
                 this.remember_active_file(cx);
+                this.track_place(cx);
                 this.follow_active_file(cx);
                 this.schedule_save(cx);
                 cx.notify();
@@ -758,6 +765,7 @@ impl Workspace {
             cx.subscribe(&side, |this, _, CodeCopied(code), cx| {
                 this.show_copied(code.clone(), "Copied code", cx)
             }),
+            cx.subscribe(&side, |this, _, _: &Jumping, _| this.places.jumping()),
             // Whichever side is clicked or typed in takes what opens next.
             cx.on_focus_in(&focus, window, move |this, _, cx| {
                 this.right_active = this.split.as_ref().is_some_and(|r| r.entity_id() == id);
@@ -797,11 +805,11 @@ impl Workspace {
         self.right_active = false;
     }
 
-    /// Opens `path` (at `line`) on the side that has it, or else on the active side.
+    /// Opens `path` (at a line and column) on the side that has it, or else on the active side.
     fn open_here(
         &mut self,
         path: &Path,
-        line: Option<u32>,
+        at: Option<(u32, u32)>,
         pass_through: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -813,8 +821,8 @@ impl Workspace {
                 self.right_active = false;
             }
         }
-        self.pane().clone().update(cx, |tabs, cx| match line {
-            Some(line) => tabs.open_at(path, line, window, cx),
+        self.pane().clone().update(cx, |tabs, cx| match at {
+            Some(at) => tabs.open_at(path, at, window, cx),
             None => tabs.open(path, pass_through, window, cx),
         });
     }
@@ -1197,6 +1205,46 @@ impl Workspace {
             self.recent_files.retain(|path| path != &active);
             self.recent_files.insert(0, active);
             self.recent_files.truncate(RECENT_FILES);
+        }
+    }
+
+    /// Tells Back where the caret is. A file walked past with Space is no place to come back to.
+    fn track_place(&mut self, cx: &App) {
+        let Some(tab) = self.pane().read(cx).active_tab() else {
+            return;
+        };
+        if tab.pass_through {
+            return;
+        }
+        let cursor = tab.editor.read(cx).cursor_position();
+        let now = Place {
+            path: tab.path.clone(),
+            line: cursor.line,
+            column: cursor.character,
+        };
+        self.places.moved(now);
+    }
+
+    /// Cmd+[ and Cmd+] (IntelliJ's Back and Forward): the caret goes back to where it jumped from,
+    /// or ahead again, reopening a tab closed since.
+    fn travel(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(folders) = self.folders(cx) else {
+            return;
+        };
+        let exists = |rel: &Path| folders.absolute(rel).is_some_and(|abs| abs.is_file());
+        let place = match back {
+            true => self.places.back(exists),
+            false => self.places.forward(exists),
+        };
+        if let Some(place) = place {
+            self.open_here(
+                &place.path,
+                Some((place.line, place.column)),
+                false,
+                window,
+                cx,
+            );
+            self.focus_editor_area(window, cx);
         }
     }
 
@@ -1651,6 +1699,7 @@ impl Workspace {
                 FinderEvent::GoToLine { line, column } => {
                     let (line, column) = (*line, *column);
                     this.close_overlay(true, window, cx);
+                    this.places.jumping();
                     this.pane()
                         .clone()
                         .update(cx, |tabs, cx| tabs.go_to_line(line, column, window, cx));
@@ -1728,7 +1777,8 @@ impl Workspace {
                 SearchEvent::Open { path, line } => {
                     this.close_overlay(false, window, cx);
                     let line = *line;
-                    this.open_here(path, Some(line), false, window, cx);
+                    this.places.jumping();
+                    this.open_here(path, Some((line, 0)), false, window, cx);
                     this.focus_editor_area(window, cx);
                 }
                 SearchEvent::Dismiss => this.close_overlay(true, window, cx),
@@ -2149,6 +2199,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::focus_editor))
             .on_action(cx.listener(Self::toggle_finder))
             .on_action(cx.listener(Self::open_recent_files))
+            .on_action(cx.listener(|this, _: &Back, window, cx| this.travel(true, window, cx)))
+            .on_action(cx.listener(|this, _: &Forward, window, cx| this.travel(false, window, cx)))
             // IntelliJ's double Shift (Search Everywhere) finds files, as Cmd+Shift+O does.
             .on_modifiers_changed(
                 cx.listener(|this, event: &ModifiersChangedEvent, window, cx| {

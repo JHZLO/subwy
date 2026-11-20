@@ -123,6 +123,9 @@ pub struct TabsChanged;
 /// A code block's copy button in the preview put this on the clipboard.
 pub struct CodeCopied(pub String);
 
+/// The caret is about to jump within the active tab (an outline station), so Back can return.
+pub struct Jumping;
+
 /// A file being read on the background executor for [`EditorTabs::open`].
 struct PendingOpen {
     id: u64,
@@ -187,6 +190,7 @@ struct Extended {
 
 impl EventEmitter<TabsChanged> for EditorTabs {}
 impl EventEmitter<CodeCopied> for EditorTabs {}
+impl EventEmitter<Jumping> for EditorTabs {}
 
 impl Focusable for EditorTabs {
     /// The active tab's editor, unless only its preview shows: keys must not edit hidden text.
@@ -472,6 +476,7 @@ impl EditorTabs {
                     )
                 })
                 .on_click(cx.listener(move |_, _: &ClickEvent, window, cx| {
+                    cx.emit(Jumping);
                     editor.update(cx, |state, cx| {
                         // From the end back up, so the view stops with the heading near its top,
                         // where the outline reads the section, not at its bottom edge.
@@ -1476,20 +1481,27 @@ impl EditorTabs {
             )
     }
 
-    /// Opens `path` with the cursor on `line` (zero-based), as a normal tab; for search results.
-    pub fn open_at(&mut self, path: &Path, line: u32, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens `path` with the cursor at `line` and `column` (zero-based), as a normal tab; for search
+    /// results and Back.
+    pub fn open_at(
+        &mut self,
+        path: &Path,
+        (line, column): (u32, u32),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(index) = self.tabs.iter().position(|t| t.path == path) {
             self.tabs[index].pass_through = false;
             let editor = self.tabs[index].editor.clone();
             editor.update(cx, |state, cx| {
-                state.set_cursor_position(Position::new(line, 0), window, cx)
+                state.set_cursor_position(Position::new(line, column), window, cx)
             });
             self.activate(index, window, cx);
             return;
         }
         self.open(path, false, window, cx);
         if let Some(pending) = self.pending.iter_mut().find(|p| p.path == path) {
-            pending.cursor = Some((line, 0));
+            pending.cursor = Some((line, column));
         }
     }
 
