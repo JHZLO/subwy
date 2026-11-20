@@ -132,6 +132,36 @@ pub fn run(check: &mut Check) {
     check
         .cx
         .update(|cx| Theme::change(ThemeMode::Dark, None, cx));
+    finds_files_made_since(check);
+}
+
+/// The finder keeps the folder's list between openings; a file made since is found all the same,
+/// once the watcher has seen it.
+fn finds_files_made_since(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("root");
+    std::fs::write(root.join("a.md"), "a\n").expect("write");
+    let window = check.open(Some(&root));
+    check.keys(window, "cmd-shift-o a escape");
+    std::fs::write(root.join("zebra.md"), "z\n").expect("write");
+    let found = check.wait_until(|check| {
+        check.keys(window, "cmd-shift-o z e b r a enter");
+        let open = check.workspace(window, |w, cx| w.active_file(cx));
+        let found = open == Some(PathBuf::from("zebra.md"));
+        if !found {
+            check.keys(window, "escape");
+        }
+        found
+    });
+    check.expect_eq(
+        "the finder finds a file made since it last opened",
+        found,
+        true,
+    );
+    check
+        .cx
+        .update_window(window, |_, window, _| window.remove_window())
+        .expect("window");
 }
 
 /// Shift down and up with no other key, clicking at `click` while it is down.

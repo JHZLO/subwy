@@ -3,6 +3,7 @@
 
 use std::{
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -10,6 +11,7 @@ use gpui_kit::{prelude::FluentBuilder as _, *};
 use subwy_project::{
     finder::DoubleShift,
     folders::Folders,
+    index::{self, FileIndex},
     network::{Network, Way},
     paths, session, watch,
 };
@@ -98,6 +100,11 @@ pub struct Workspace {
     copy_seq: u64,
     /// One per folder; dropping them stops watching.
     _watchers: Vec<watch::Watcher>,
+    /// The finder's file list from the last walk of the folders, shown at once when it opens.
+    file_index: Option<Arc<FileIndex>>,
+    /// Files came or went since that walk began, so the next finder walks again.
+    file_index_stale: bool,
+    file_index_walk: Task<()>,
     /// Writes the session a moment after the last change.
     save_task: Task<()>,
     /// Which of the recent folders the empty window has selected.
@@ -433,6 +440,9 @@ impl Workspace {
             copied: None,
             copy_seq: 0,
             _watchers: Vec::new(),
+            file_index: None,
+            file_index_stale: true,
+            file_index_walk: Task::ready(()),
             save_task: Task::ready(()),
             recent_selected: 0,
             window: handle,
@@ -917,6 +927,10 @@ impl Workspace {
 
     /// Watches the folders; each batch of outside changes refreshes the tree and the open files.
     fn watch(&mut self, folders: &Folders, window: &mut Window, cx: &mut Context<Self>) {
+        // Other folders: the list of the old ones is no use, nor a walk of them.
+        self.file_index = None;
+        self.file_index_stale = true;
+        self.file_index_walk = Task::ready(());
         let (tx, rx) = smol::channel::unbounded::<watch::Changes>();
         self._watchers = folders
             .roots()
@@ -946,6 +960,9 @@ impl Workspace {
         cx.spawn_in(window, async move |this, cx| {
             while let Ok(changes) = rx.recv().await {
                 let applied = this.update_in(cx, |this, window, cx| {
+                    if !changes.dirs.is_empty() {
+                        this.file_index_stale = true;
+                    }
                     if let Some(panel) = this.panel.clone() {
                         panel.update(cx, |panel, cx| panel.refresh_dirs(&changes.dirs, cx));
                     }
@@ -961,6 +978,33 @@ impl Workspace {
             }
         })
         .detach();
+    }
+
+    /// Walks the folders again for the finder when files came or went since the last walk (a big
+    /// folder takes seconds), and hands the list to the finder if it is open. The finder shows
+    /// the last list meanwhile. The walk outlives the finder, so closing it early wastes nothing.
+    fn refresh_file_index(&mut self, folders: Folders, cx: &mut Context<Self>) {
+        if !self.file_index_stale {
+            return;
+        }
+        // Cleared now, so changes during the walk call for another.
+        self.file_index_stale = false;
+        self.file_index_walk = cx.spawn(async move |this, cx| {
+            let walked = cx
+                .background_spawn(async move { index::build_folders(&folders) })
+                .await;
+            let walked = Arc::new(walked);
+            let _ = this.update(cx, |this, cx| {
+                this.file_index = Some(walked.clone());
+                if let Some(Overlay {
+                    view: OverlayView::Finder(finder),
+                    ..
+                }) = &this.overlay
+                {
+                    finder.update(cx, |finder, cx| finder.set_index(walked, cx));
+                }
+            });
+        });
     }
 
     /// Auto-save, when the window loses focus or the terminal takes it: writes the edited tabs that
@@ -1546,7 +1590,9 @@ impl Workspace {
         let Some(folders) = self.folders(cx) else {
             return;
         };
-        let view = cx.new(|cx| Finder::new(folders, window, cx));
+        let cached = self.file_index.clone();
+        let view = cx.new(|cx| Finder::new(folders.clone(), cached, window, cx));
+        self.refresh_file_index(folders, cx);
         let subscription = cx.subscribe_in(
             &view,
             window,

@@ -9,7 +9,7 @@ use subwy_project::{
     finder::{self, Route},
     folders::Folders,
     fuzzy,
-    index::{self, FileIndex},
+    index::FileIndex,
 };
 
 use crate::{
@@ -62,13 +62,13 @@ pub enum FinderEvent {
 
 pub struct Finder {
     input: Entity<InputState>,
-    /// Empty until the walk of the folder, started when the finder opens, comes back.
+    /// The window's file list (see `Workspace::refresh_file_index`); empty until its first walk
+    /// comes back.
     index: Option<Arc<FileIndex>>,
     found: fuzzy::Found,
     /// The name each route starts from; `None` when the paths start with their folder's name.
     window_folder: Option<String>,
     selected: usize,
-    _load: Task<()>,
     /// The search for the latest query; replacing it drops the result of an older one.
     search: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -83,44 +83,52 @@ impl Focusable for Finder {
 }
 
 impl Finder {
-    pub fn new(folders: Folders, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        folders: Folders,
+        index: Option<Arc<FileIndex>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let window_folder = (!folders.several()).then(|| folders.name().to_string());
         let input = cx.new(|cx| InputState::new(window, cx).placeholder("Go to file"));
         let subscriptions = vec![cx.subscribe_in(
             &input,
             window,
             |this, _, event: &InputEvent, _, cx| match event {
-                InputEvent::Change => this.refilter(cx),
+                InputEvent::Change => this.refilter(None, cx),
                 InputEvent::Blur => cx.emit(FinderEvent::FocusLost),
                 _ => {}
             },
         )];
-        let load = cx.spawn(async move |this, cx| {
-            let index = cx
-                .background_spawn(async move { index::build_folders(&folders) })
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                this.index = Some(Arc::new(index));
-                this.refilter(cx);
-            });
-        });
-        Self {
+        let mut this = Self {
             input,
-            index: None,
+            index,
             found: fuzzy::Found::default(),
             window_folder,
             selected: 0,
-            _load: load,
             search: Task::ready(()),
             _subscriptions: subscriptions,
-        }
+        };
+        this.refilter(None, cx);
+        this
+    }
+
+    /// A fresh walk of the folders came back: search it, keeping the chosen file chosen.
+    pub fn set_index(&mut self, index: Arc<FileIndex>, cx: &mut Context<Self>) {
+        let chosen = self
+            .index
+            .as_ref()
+            .zip(self.found.matches.get(self.selected))
+            .map(|(index, found)| index.paths[found.index].clone());
+        self.index = Some(index);
+        self.refilter(chosen, cx);
     }
 
     /// Starts the finder on `query`, as Cmd+L does with a colon.
     pub fn set_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.input
             .update(cx, |input, cx| input.set_value(query, window, cx));
-        self.refilter(cx);
+        self.refilter(None, cx);
     }
 
     /// The query asks for a line, not a file.
@@ -129,7 +137,8 @@ impl Finder {
     }
 
     /// Searches off the main thread: a large folder takes a few milliseconds per keystroke.
-    fn refilter(&mut self, cx: &mut Context<Self>) {
+    /// `keep` stays chosen if it is still found; otherwise the first row is.
+    fn refilter(&mut self, keep: Option<String>, cx: &mut Context<Self>) {
         if self.wants_line(cx) {
             self.search = Task::ready(());
             self.found = fuzzy::Found::default();
@@ -140,13 +149,21 @@ impl Finder {
             return;
         };
         let query = self.input.read(cx).value().to_string();
+        let searched = index.clone();
         let search =
-            cx.background_spawn(async move { fuzzy::search(&query, &index.paths, MAX_ROWS) });
+            cx.background_spawn(async move { fuzzy::search(&query, &searched.paths, MAX_ROWS) });
         self.search = cx.spawn(async move |this, cx| {
             let found = search.await;
             let _ = this.update(cx, |this, cx| {
+                this.selected = keep
+                    .and_then(|keep| {
+                        found
+                            .matches
+                            .iter()
+                            .position(|m| index.paths[m.index] == keep)
+                    })
+                    .unwrap_or(0);
                 this.found = found;
-                this.selected = 0;
                 cx.notify();
             });
         });
