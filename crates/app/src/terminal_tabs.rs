@@ -1,15 +1,16 @@
 //! The terminal island's tabs, as in IntelliJ's Terminal: several shells in the open folder, one
 //! shown at a time. Cmd+T adds one (anywhere in the window), Cmd+W closes the one in front,
-//! Cmd+Shift+[ and ] step between them, Shift+F6 or a double click renames one, and a shell that
-//! exits takes its tab with it.
+//! Cmd+Shift+[ and ] step between them, Shift+F6, a double click or the right-click menu renames
+//! one, and a shell that exits takes its tab with it.
 
 use std::path::{Path, PathBuf};
 
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
-use gpui_kit::{prelude::FluentBuilder as _, *};
+use gpui_kit::{TestSupportExt as _, prelude::FluentBuilder as _, *};
 
 use crate::{
     keymap::{CloseTerminal, NextTerminal, PrevTerminal, RenameTerminal},
+    project_panel::{floating, popup_box, popup_item},
     terminal_panel::{TerminalEvent, TerminalPanel},
     theme::{self, c, size, z},
 };
@@ -56,6 +57,8 @@ pub struct TerminalTabs {
     tabs: Vec<Tab>,
     active: usize,
     renaming: Option<Renaming>,
+    /// The tab whose right-click menu is open, by number.
+    menu: Option<usize>,
 }
 
 impl EventEmitter<TerminalTabsEvent> for TerminalTabs {}
@@ -68,6 +71,7 @@ impl TerminalTabs {
             tabs: Vec::new(),
             active: 0,
             renaming: None,
+            menu: None,
         }
     }
 
@@ -286,6 +290,45 @@ impl TerminalTabs {
         }
     }
 
+    /// A tab's right-click menu under it, in the tree's menu look: what its keys do, by mouse.
+    fn render_menu(&self, number: usize, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let p = theme::colors(cx);
+        let key = |key: &'static str| {
+            div()
+                .ml_auto()
+                .pl(z(16., cx))
+                .text_size(z(11.5, cx))
+                .text_color(c(p.sub))
+                .child(key)
+        };
+        let rename = popup_item("terminal-menu-rename", None, "Rename…", false, cx)
+            .child(key("⇧F6"))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.menu = None;
+                if let Some(index) = this.tabs.iter().position(|t| t.number == number) {
+                    this.start_rename(index, window, cx);
+                }
+            }))
+            .test_support();
+        let close = popup_item("terminal-menu-close", None, "Close Tab", false, cx)
+            .child(key("⌘W"))
+            .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                this.menu = None;
+                if let Some(index) = this.tabs.iter().position(|t| t.number == number) {
+                    this.close(index, window, cx);
+                }
+            }))
+            .test_support();
+        let list = popup_box(cx)
+            .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, _, cx| {
+                this.menu = None;
+                cx.notify();
+            }))
+            .child(rename)
+            .child(close);
+        floating(size::TERMINAL_TABS, Anchor::TopLeft, list, cx)
+    }
+
     fn render_tab_bar(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let p = theme::colors(cx);
         let tabs: Vec<_> = self
@@ -379,6 +422,17 @@ impl TerminalTabs {
                             _ => this.activate(index, window, cx),
                         }
                     }))
+                    .on_mouse_down(MouseButton::Right, {
+                        let number = tab.number;
+                        cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                            this.menu = Some(number);
+                            cx.notify();
+                        })
+                    })
+                    .when(self.menu == Some(tab.number), |el| {
+                        el.child(self.render_menu(tab.number, cx))
+                    })
+                    .test_support()
             })
             .collect();
         div()

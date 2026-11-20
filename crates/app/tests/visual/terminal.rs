@@ -7,7 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui_kit::AnyWindowHandle;
+use gpui_kit::{
+    AnyWindowHandle, ElementId, Modifiers, MouseButton, Pixels, Point, test::TestWindowExt as _,
+};
 use subwy_project::session::{self, TerminalState};
 
 use crate::check::{Check, fixture};
@@ -139,6 +141,46 @@ fn rename(check: &mut Check, window: AnyWindowHandle) {
         numbered,
         vec!["Local".to_string(), "Local (2)".to_string()],
     );
+
+    // The right-click menu's Rename does the same.
+    let tab = center(check, window, ("terminal-tab", 2usize)).expect("second tab");
+    let none = Modifiers::default();
+    check
+        .cx
+        .simulate_mouse_down(window, tab, MouseButton::Right, none);
+    check
+        .cx
+        .simulate_mouse_up(window, tab, MouseButton::Right, none);
+    check.cx.run_until_parked();
+    check.shot(window, "terminal-menu");
+    let item = center(check, window, "terminal-menu-rename");
+    check.expect_eq("a tab's right-click menu has Rename", item.is_some(), true);
+    if let Some(item) = item {
+        check.cx.simulate_click(window, item, none);
+        check.cx.simulate_input(window, "menu");
+        check.keys(window, "enter");
+    }
+    let renamed = titles(check);
+    check.expect_eq(
+        "the menu's Rename renames the tab",
+        renamed,
+        vec!["Local".to_string(), "menu".to_string()],
+    );
+}
+
+/// The middle of the element `id` as last drawn, in window pixels.
+fn center(
+    check: &mut Check,
+    window: AnyWindowHandle,
+    id: impl Into<ElementId>,
+) -> Option<Point<Pixels>> {
+    check
+        .cx
+        .update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            window.try_find(id).map(|element| element.bounds().center())
+        })
+        .expect("window")
 }
 
 /// Closed and opened again, a folder's terminal comes back: its tabs, each in the folder `cd`

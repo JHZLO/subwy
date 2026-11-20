@@ -2310,7 +2310,7 @@ pub(crate) fn header_button(
 
 /// A list that floats `top` below where it is placed, drawn over everything and kept on screen.
 /// `corner` is the list's corner that sits there.
-fn floating<E: IntoElement>(
+pub(crate) fn floating<E: IntoElement>(
     top: f32,
     corner: Anchor,
     list: E,
@@ -2332,7 +2332,7 @@ fn floating<E: IntoElement>(
         )
 }
 
-fn popup_box(cx: &App) -> Div {
+pub(crate) fn popup_box(cx: &App) -> Div {
     let p = theme::colors(cx);
     div()
         .occlude()
@@ -2349,7 +2349,7 @@ fn popup_box(cx: &App) -> Div {
 }
 
 /// One line of a floating list; `highlighted` is the one Enter picks.
-fn popup_item(
+pub(crate) fn popup_item(
     id: impl Into<ElementId>,
     icon: Option<IconName>,
     label: &'static str,
