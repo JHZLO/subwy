@@ -5,7 +5,8 @@ use gpui_kit::*;
 
 use crate::keymap::{
     CloseTab, CopyFileName, CopyPath, CopyRelativePath, FocusTree, NewWindow, NextTab, OpenFolder,
-    OpenSettings, PrevTab, Quit, RevealInFinder, Save, TogglePreview, ZoomIn, ZoomOut, ZoomReset,
+    OpenSettings, PrevTab, Quit, RevealInFinder, Save, ShowLocalHistory, TogglePreview, ZoomIn,
+    ZoomOut, ZoomReset,
 };
 
 fn menu(name: &str, items: Vec<MenuItem>) -> Menu {
@@ -34,6 +35,7 @@ pub fn init(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action("Save", Save),
                 MenuItem::action("Close Tab", CloseTab),
+                MenuItem::action("Local History…", ShowLocalHistory),
                 MenuItem::separator(),
                 MenuItem::action("Reveal in Finder", RevealInFinder),
             ],

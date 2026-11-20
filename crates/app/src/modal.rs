@@ -10,6 +10,7 @@ use crate::theme::{self, c, z};
 pub const FINDER_LINE: usize = 0;
 pub const SEARCH_LINE: usize = 3;
 pub const SETTINGS_LINE: usize = 1;
+pub const HISTORY_LINE: usize = 4;
 
 /// The sign at a sheet's top, and the line across its middle, as thick as the tree's routes.
 pub const SIGN_HEIGHT: f32 = 58.;

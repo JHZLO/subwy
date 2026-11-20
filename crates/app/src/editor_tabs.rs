@@ -6,7 +6,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use gpui_kit::component::{
@@ -23,7 +23,7 @@ use gpui_kit::{TestSupportExt as _, assets::IconName, prelude::FluentBuilder as 
 use subwy_project::{
     folders::Folders,
     fs::{self, FileStamp, LineEnding, MAX_HIGHLIGHT_BYTES, ReadError, TextFile},
-    lines,
+    history, lines,
     markdown::{self, Edit, Emphasis, Link},
     session::TabState,
 };
@@ -943,9 +943,14 @@ impl EditorTabs {
                 .absolute(&tab.path)
                 .unwrap_or_else(|| tab.path.clone());
             let text = tab.editor.read(cx).text().to_string();
-            if let Saved::Written(stamp) =
-                write_file(&path, &text, Some(tab.stamp), tab.line_ending, tab.bom)
-            {
+            if let Saved::Written(stamp) = write_file(
+                &path,
+                &text,
+                Some(tab.stamp),
+                tab.line_ending,
+                tab.bom,
+                &history::default_dir(),
+            ) {
                 tab.stamp = stamp;
                 tab.dirty = false;
             }
@@ -993,9 +998,17 @@ impl EditorTabs {
         // A deleted file is written again without asking.
         let expected = (!overwrite && !tab.deleted).then_some(tab.stamp);
         let (line_ending, bom) = (tab.line_ending, tab.bom);
-        let task = cx
-            .background_executor()
-            .spawn(async move { write_file(&path, &text.to_string(), expected, line_ending, bom) });
+        let history_dir = history::default_dir();
+        let task = cx.background_executor().spawn(async move {
+            write_file(
+                &path,
+                &text.to_string(),
+                expected,
+                line_ending,
+                bom,
+                &history_dir,
+            )
+        });
         cx.spawn_in(window, async move |this, cx| {
             let saved = task.await;
             let _ = this.update_in(cx, |this, window, cx| {
@@ -1607,6 +1620,31 @@ impl EditorTabs {
         };
         editor.update(cx, |state, cx| {
             state.set_cursor_position(Position::new(line - 1, column - 1), window, cx)
+        });
+    }
+
+    /// Local History's restore: the active tab's text becomes `text` in one edit, which Cmd+Z takes
+    /// back, with the caret where the two first differ. A read-only tab stays as it is.
+    pub fn restore_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(editor) = self
+            .active_tab()
+            .filter(|tab| !tab.read_only)
+            .map(|tab| tab.editor.clone())
+        else {
+            return;
+        };
+        editor.update(cx, |state, cx| {
+            let old = state.text().to_string();
+            // The texts agree up to here, so it falls between characters in both.
+            let at = old
+                .char_indices()
+                .zip(text.chars())
+                .find(|((_, a), b)| a != b)
+                .map_or(old.len().min(text.len()), |((at, _), _)| at);
+            state.set_selected_range(0..old.len(), cx);
+            state.replace(text.to_string(), window, cx);
+            let position = state.text().offset_to_position(at);
+            state.set_cursor_position(position, window, cx);
         });
     }
 
@@ -2578,14 +2616,15 @@ enum Saved {
     Failed(String),
 }
 
-/// Writes `text` to `path` (a symlink's target), unless the file's stamp is no longer `expected`.
-/// Runs on the background executor.
+/// Writes `text` to `path` (a symlink's target), unless the file's stamp is no longer `expected`,
+/// and keeps it in the local history in `history_dir`. Runs on the background executor.
 fn write_file(
     path: &Path,
     text: &str,
     expected: Option<FileStamp>,
     line_ending: LineEnding,
     bom: bool,
+    history_dir: &Path,
 ) -> Saved {
     let target = fs::write_target(path);
     if let Some(expected) = expected
@@ -2594,8 +2633,17 @@ fn write_file(
     {
         return Saved::ChangedOnDisk;
     }
+    // What the save writes over, which the history may not have yet.
+    let before = fs::read_text(&target).ok();
     match fs::write_text(&target, text, line_ending, bom) {
-        Ok(stamp) => Saved::Written(stamp),
+        Ok(stamp) => {
+            let before = before
+                .as_ref()
+                .map(|file| (file.text.as_str(), file.stamp.modified));
+            // A history that cannot be written does not stop the save.
+            let _ = history::keep(history_dir, path, before, text, SystemTime::now());
+            Saved::Written(stamp)
+        }
         Err(err) => Saved::Failed(err.to_string()),
     }
 }
@@ -2630,7 +2678,10 @@ mod tests {
     use std::path::Path;
 
     use super::{DiskState, Saved, active_after_close, check_disk, language_for, write_file};
-    use subwy_project::fs::{self, LineEnding};
+    use subwy_project::{
+        fs::{self, LineEnding},
+        history,
+    };
 
     fn temp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("subwy-{name}-{}", std::process::id()));
@@ -2665,10 +2716,14 @@ mod tests {
     fn write_file_asks_before_replacing_a_changed_file() {
         let dir = temp_dir("write-file");
         let path = dir.join("a.md");
+        let history_dir = dir.join("history");
+        let write = |text: &str, expected| {
+            write_file(&path, text, expected, LineEnding::Lf, false, &history_dir)
+        };
         std::fs::write(&path, "one\n").unwrap();
         let read = fs::stamp(&path).unwrap();
 
-        let written = match write_file(&path, "two\n", Some(read), LineEnding::Lf, false) {
+        let written = match write("two\n", Some(read)) {
             Saved::Written(stamp) => stamp,
             other => panic!("expected a write, got {other:?}"),
         };
@@ -2676,7 +2731,7 @@ mod tests {
 
         std::fs::write(&path, "changed elsewhere\n").unwrap();
         assert!(matches!(
-            write_file(&path, "three\n", Some(written), LineEnding::Lf, false),
+            write("three\n", Some(written)),
             Saved::ChangedOnDisk
         ));
         assert_eq!(
@@ -2685,16 +2740,20 @@ mod tests {
         );
 
         // Overwriting, or writing a deleted file again, does not check.
-        assert!(matches!(
-            write_file(&path, "three\n", None, LineEnding::Lf, false),
-            Saved::Written(_)
-        ));
+        assert!(matches!(write("three\n", None), Saved::Written(_)));
         std::fs::remove_file(&path).unwrap();
-        assert!(matches!(
-            write_file(&path, "four\n", None, LineEnding::Lf, false),
-            Saved::Written(_)
-        ));
+        assert!(matches!(write("four\n", None), Saved::Written(_)));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "four\n");
+
+        // The history kept every text a save wrote over, the one changed elsewhere too.
+        let kept: Vec<String> = history::stations(&history_dir, &path)
+            .iter()
+            .map(|station| station.read().unwrap())
+            .collect();
+        assert_eq!(
+            kept,
+            ["four\n", "three\n", "changed elsewhere\n", "two\n", "one\n"]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

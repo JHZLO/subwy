@@ -10,6 +10,7 @@ mod finder;
 pub mod icons;
 pub mod keymap;
 mod keymap_view;
+mod local_history;
 mod menus;
 mod modal;
 mod preview;

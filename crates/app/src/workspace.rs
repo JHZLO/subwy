@@ -26,9 +26,11 @@ use crate::{
         Back, CloseSettings, CloseTab, Collapse, CopyFileName, CopyPath, CopyRelativePath, Expand,
         FindBacklinks, FocusEditor, FocusTree, Forward, GoToLine, NewTerminal, NewWindow, NextTab,
         Open, OpenFolder, OpenSettings, PrevTab, Quit, RecentFiles, ReopenClosedTab,
-        RevealInFinder, Save, SelectNext, SelectPrev, ToggleFinder, ToggleFocusMode, TogglePreview,
-        ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
+        RevealInFinder, Save, SelectNext, SelectPrev, ShowLocalHistory, ToggleFinder,
+        ToggleFocusMode, TogglePreview, ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut,
+        ZoomReset,
     },
+    local_history::{self, HistoryEvent, LocalHistory},
     project_panel::{DraggedItems, FileEvent, PanelEvent, ProjectPanel, ResizeDrag},
     search_panel::{self, SearchEvent, SearchPanel},
     settings_view::{self, SettingsView},
@@ -45,10 +47,11 @@ enum AfterDiscard {
     CloseWindow,
 }
 
-/// What floats over the window: the file finder or the folder search, one at a time.
+/// What floats over the window: the file finder, the folder search or Local History, one at a time.
 enum OverlayView {
     Finder(Entity<Finder>),
     Search(Entity<SearchPanel>),
+    History(Entity<LocalHistory>),
 }
 
 /// The items a copy action copies, relative to the window, and the editor's selected lines.
@@ -1382,7 +1385,7 @@ impl Workspace {
     pub fn search_summary(&self, cx: &App) -> Option<String> {
         match &self.overlay.as_ref()?.view {
             OverlayView::Search(view) => view.read(cx).summary(),
-            OverlayView::Finder(_) => None,
+            OverlayView::Finder(_) | OverlayView::History(_) => None,
         }
     }
 
@@ -1390,7 +1393,16 @@ impl Workspace {
     pub fn search_preview(&self, cx: &App) -> Option<(String, String)> {
         match &self.overlay.as_ref()?.view {
             OverlayView::Search(view) => view.read(cx).preview(cx),
-            OverlayView::Finder(_) => None,
+            OverlayView::Finder(_) | OverlayView::History(_) => None,
+        }
+    }
+
+    /// How many earlier saves Local History lists once it has read them; `None` while it is
+    /// closed. For the UI checks.
+    pub fn history_stops(&self, cx: &App) -> Option<usize> {
+        match &self.overlay.as_ref()?.view {
+            OverlayView::History(view) => view.read(cx).stops(),
+            OverlayView::Finder(_) | OverlayView::Search(_) => None,
         }
     }
 
@@ -1759,6 +1771,57 @@ impl Workspace {
         let recent = recent.iter().map(|path| paths::relative(path)).collect();
         let view = cx.new(|cx| Finder::recent(folders, recent, window, cx));
         self.show_finder(view, window, cx);
+    }
+
+    /// Alt+Shift+H (IntelliJ's Local History): the active file's earlier saves over the window,
+    /// beside the file now; or closes them.
+    fn show_local_history(
+        &mut self,
+        _: &ShowLocalHistory,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(
+            self.overlay,
+            Some(Overlay {
+                view: OverlayView::History(_),
+                ..
+            })
+        ) {
+            self.close_overlay(true, window, cx);
+            return;
+        }
+        let Some(folders) = self.folders(cx) else {
+            return;
+        };
+        let Some(tab) = self.pane().read(cx).active_tab() else {
+            return;
+        };
+        let Some(file) = folders.absolute(&tab.path) else {
+            return;
+        };
+        let name = tab
+            .path
+            .file_name()
+            .map(paths::display_name)
+            .unwrap_or_default();
+        let now = tab.editor.read(cx).text().to_string();
+        let view = cx.new(|cx| LocalHistory::new(file, name, now, cx));
+        let subscription = cx.subscribe_in(
+            &view,
+            window,
+            |this, _, event: &HistoryEvent, window, cx| match event {
+                HistoryEvent::Restore(text) => {
+                    this.close_overlay(true, window, cx);
+                    this.pane()
+                        .clone()
+                        .update(cx, |tabs, cx| tabs.restore_text(text, window, cx));
+                }
+                HistoryEvent::Dismiss => this.close_overlay(true, window, cx),
+            },
+        );
+        let focus = view.read(cx).focus_handle(cx);
+        self.show_overlay(OverlayView::History(view), focus, subscription, window, cx);
     }
 
     /// Shows `view` over the window and acts on what is picked in it.
@@ -2275,6 +2338,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::focus_editor))
             .on_action(cx.listener(Self::toggle_finder))
             .on_action(cx.listener(Self::open_recent_files))
+            .on_action(cx.listener(Self::show_local_history))
             .on_action(cx.listener(|this, _: &Back, window, cx| this.travel(true, window, cx)))
             .on_action(cx.listener(|this, _: &Forward, window, cx| this.travel(false, window, cx)))
             // IntelliJ's double Shift (Search Everywhere) finds files, as Cmd+Shift+O does.
@@ -2484,6 +2548,9 @@ impl Render for Workspace {
                     OverlayView::Finder(view) => el.child(finder::overlay(view.clone(), close, cx)),
                     OverlayView::Search(view) => {
                         el.child(search_panel::overlay(view.clone(), close, cx))
+                    }
+                    OverlayView::History(view) => {
+                        el.child(local_history::overlay(view.clone(), close, cx))
                     }
                 }
             })

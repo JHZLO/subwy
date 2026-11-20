@@ -6857,6 +6857,7 @@ dependencies = [
  "notify",
  "serde",
  "serde_json",
+ "similar",
  "tempfile",
  "trash",
  "unicode-normalization",

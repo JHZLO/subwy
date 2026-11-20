@@ -31,6 +31,7 @@ actions!(
         RecentFiles,
         Back,
         Forward,
+        ShowLocalHistory,
         RevealInFinder,
         ToggleSearch,
         NewWindow,
@@ -74,6 +75,9 @@ actions!(
 
 /// The Settings dialog has focus.
 pub const SETTINGS: &str = "Settings";
+
+/// Local History (Alt+Shift+H) has focus.
+pub const LOCAL_HISTORY: &str = "LocalHistory";
 
 actions!(settings, [CloseSettings]);
 
@@ -240,6 +244,32 @@ fn own_keys() -> Vec<Own> {
         // Shift+Tab; bound again there, Back and Forward win.
         own("cmd-[", Back, Some(EDITOR_INPUT)),
         own("cmd-]", Forward, Some(EDITOR_INPUT)),
+        // IntelliJ gives Local History no key of its own.
+        own("alt-shift-h", ShowLocalHistory, ws),
+        // Its list moves and closes with the keys the finder's query field gives the finder.
+        own(
+            "up",
+            gpui_kit::component::input::MoveUp,
+            Some(LOCAL_HISTORY),
+        ),
+        own(
+            "down",
+            gpui_kit::component::input::MoveDown,
+            Some(LOCAL_HISTORY),
+        ),
+        own(
+            "enter",
+            gpui_kit::component::input::Enter {
+                secondary: false,
+                shift: false,
+            },
+            Some(LOCAL_HISTORY),
+        ),
+        own(
+            "escape",
+            gpui_kit::component::input::Escape,
+            Some(LOCAL_HISTORY),
+        ),
         own("cmd-shift-f", ToggleSearch, ws),
         // gpui-kit binds cmd-shift-f to replace inside its editor ("Input"), which would win there; the
         // folder search takes it, and replace moves to cmd-r as in IntelliJ.

@@ -5,6 +5,7 @@ pub mod finder;
 pub mod folders;
 pub mod fs;
 pub mod fuzzy;
+pub mod history;
 pub mod index;
 pub mod lines;
 pub mod markdown;

@@ -6,6 +6,7 @@
 mod check;
 mod finder;
 mod folders;
+mod history;
 mod islands;
 mod lines;
 mod links;
@@ -39,10 +40,12 @@ fn main() {
         r#"{ "keymap": [ { "key": "cmd-p", "action": "workspace::ToggleFinder", "context": "Workspace" } ] }"#,
     )
     .expect("write settings");
+    let history = tempfile::tempdir().expect("history dir");
     // Safe: set before anything else runs, on the only thread.
     unsafe {
         std::env::set_var("SUBWY_SESSION_PATH", session.path());
         std::env::set_var("SUBWY_SETTINGS_PATH", settings.path());
+        std::env::set_var("SUBWY_HISTORY_PATH", history.path());
         std::env::set_var("SUBWY_SHELL", "/bin/sh");
     }
 
@@ -82,6 +85,7 @@ fn main() {
     saving::run(&mut check);
     tabs::run(&mut check);
     places::run(&mut check);
+    history::run(&mut check);
 
     if check.failures.is_empty() {
         println!("visual checks passed; screenshots in target/visual/");

@@ -29,6 +29,7 @@ gpui_kit::assets::icon_assets!(
         FolderPlus,
         FolderMinus,
         Settings,
+        Clock,
     ]
 );
 
