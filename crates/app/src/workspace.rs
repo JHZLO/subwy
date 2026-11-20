@@ -23,9 +23,9 @@ use crate::{
     keymap::{
         CloseSettings, CloseTab, Collapse, CopyFileName, CopyPath, CopyRelativePath, Expand,
         FindBacklinks, FocusEditor, FocusTree, GoToLine, NewTerminal, NewWindow, NextTab, Open,
-        OpenFolder, OpenSettings, PrevTab, Quit, ReopenClosedTab, RevealInFinder, Save, SelectNext,
-        SelectPrev, ToggleFinder, TogglePreview, ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn,
-        ZoomOut, ZoomReset,
+        OpenFolder, OpenSettings, PrevTab, Quit, RecentFiles, ReopenClosedTab, RevealInFinder,
+        Save, SelectNext, SelectPrev, ToggleFinder, TogglePreview, ToggleSearch, ToggleTerminal,
+        WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
     },
     project_panel::{DraggedItems, FileEvent, PanelEvent, ProjectPanel, ResizeDrag},
     search_panel::{self, SearchEvent, SearchPanel},
@@ -79,6 +79,9 @@ struct Overlay {
     _subscription: Subscription,
 }
 
+/// How many files Cmd+E remembers, as IntelliJ's Recent Files does.
+const RECENT_FILES: usize = 50;
+
 pub struct Workspace {
     panel: Option<Entity<ProjectPanel>>,
     /// The editor, or its left side when split.
@@ -112,6 +115,8 @@ pub struct Workspace {
     window: AnyWindowHandle,
     /// The active file the tree last moved to, so it follows only real switches.
     followed: Option<PathBuf>,
+    /// The files that were active, latest first: what Cmd+E lists.
+    recent_files: Vec<PathBuf>,
     double_shift: DoubleShift,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -447,6 +452,7 @@ impl Workspace {
             recent_selected: 0,
             window: handle,
             followed: None,
+            recent_files: Vec::new(),
             double_shift: DoubleShift::default(),
             focus_handle,
             _subscriptions: subscriptions,
@@ -632,6 +638,7 @@ impl Workspace {
         }
         self.panel = Some(panel.clone());
         self.followed = None;
+        self.recent_files.clear();
         self.recent_selected = 0;
         // What the Window menu and the Dock list this window as.
         window.set_window_title(folders.name());
@@ -743,6 +750,7 @@ impl Workspace {
         self._subscriptions.extend([
             cx.subscribe(&side, |this, _, _: &TabsChanged, cx| {
                 this.close_empty_side(cx);
+                this.remember_active_file(cx);
                 this.follow_active_file(cx);
                 this.schedule_save(cx);
                 cx.notify();
@@ -1180,6 +1188,18 @@ impl Workspace {
         });
     }
 
+    /// The active file goes to the front of the recent files.
+    fn remember_active_file(&mut self, cx: &App) {
+        let Some(active) = self.active_file(cx) else {
+            return;
+        };
+        if self.recent_files.first() != Some(&active) {
+            self.recent_files.retain(|path| path != &active);
+            self.recent_files.insert(0, active);
+            self.recent_files.truncate(RECENT_FILES);
+        }
+    }
+
     /// The tree shows the file in the active tab (IntelliJ's "always select opened file").
     fn follow_active_file(&mut self, cx: &mut Context<Self>) {
         if !crate::settings(cx).follow_active_file {
@@ -1593,6 +1613,32 @@ impl Workspace {
         let cached = self.file_index.clone();
         let view = cx.new(|cx| Finder::new(folders.clone(), cached, window, cx));
         self.refresh_file_index(folders, cx);
+        self.show_finder(view, window, cx);
+    }
+
+    /// Cmd+E (IntelliJ's Recent Files): the finder over the files that were active, latest first,
+    /// then the other open tabs; or closes it.
+    fn open_recent_files(&mut self, _: &RecentFiles, window: &mut Window, cx: &mut Context<Self>) {
+        if self.finder_open() {
+            self.close_overlay(true, window, cx);
+            return;
+        }
+        let Some(folders) = self.folders(cx) else {
+            return;
+        };
+        let mut recent = self.recent_files.clone();
+        for open in self.open_files(cx) {
+            if !recent.contains(&open) {
+                recent.push(open);
+            }
+        }
+        let recent = recent.iter().map(|path| paths::relative(path)).collect();
+        let view = cx.new(|cx| Finder::recent(folders, recent, window, cx));
+        self.show_finder(view, window, cx);
+    }
+
+    /// Shows `view` over the window and acts on what is picked in it.
+    fn show_finder(&mut self, view: Entity<Finder>, window: &mut Window, cx: &mut Context<Self>) {
         let subscription = cx.subscribe_in(
             &view,
             window,
@@ -2102,6 +2148,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::focus_tree))
             .on_action(cx.listener(Self::focus_editor))
             .on_action(cx.listener(Self::toggle_finder))
+            .on_action(cx.listener(Self::open_recent_files))
             // IntelliJ's double Shift (Search Everywhere) finds files, as Cmd+Shift+O does.
             .on_modifiers_changed(
                 cx.listener(|this, event: &ModifiersChangedEvent, window, cx| {

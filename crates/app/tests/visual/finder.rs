@@ -133,6 +133,49 @@ pub fn run(check: &mut Check) {
         .cx
         .update(|cx| Theme::change(ThemeMode::Dark, None, cx));
     finds_files_made_since(check);
+    recent_files_go_back(check);
+}
+
+/// Cmd+E lists the files that were active, latest first, and starts on the one before the active
+/// one, so Enter goes back to it; typing picks among them.
+fn recent_files_go_back(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path().canonicalize().expect("root");
+    for name in ["a.md", "b.md"] {
+        std::fs::write(root.join(name), format!("# {name}\n")).expect("write");
+    }
+    let window = check.open(Some(&root));
+    // Rows: the folder, a.md, b.md. b.md opens last, in front.
+    check.keys(window, "down down enter cmd-1 down enter");
+    let active = |check: &mut Check| check.workspace(window, |w, cx| w.active_file(cx));
+    check.wait_until(|check| active(check) == Some(PathBuf::from("b.md")));
+    check.keys(window, "cmd-e");
+    check.shot(window, "finder-recent");
+    check.keys(window, "enter");
+    let back = active(check);
+    check.expect_eq(
+        "cmd-e then enter goes back to the file before",
+        back,
+        Some(PathBuf::from("a.md")),
+    );
+    check.keys(window, "cmd-e enter");
+    let again = active(check);
+    check.expect_eq(
+        "and once more comes back",
+        again,
+        Some(PathBuf::from("b.md")),
+    );
+    check.keys(window, "cmd-e a enter");
+    let typed = active(check);
+    check.expect_eq(
+        "typing picks among the recent files",
+        typed,
+        Some(PathBuf::from("a.md")),
+    );
+    check
+        .cx
+        .update_window(window, |_, window, _| window.remove_window())
+        .expect("window");
 }
 
 /// The finder keeps the folder's list between openings; a file made since is found all the same,

@@ -1,5 +1,6 @@
 //! The file finder (Cmd+Shift+O): type part of a path, pick a file, open it. Started with a colon
-//! (Cmd+L), it asks for a line of the open file instead.
+//! (Cmd+L), it asks for a line of the open file instead. Over the recent files (Cmd+E) it is
+//! IntelliJ's Recent Files.
 
 use std::{ops::Range, path::PathBuf, sync::Arc};
 
@@ -69,6 +70,8 @@ pub struct Finder {
     /// The name each route starts from; `None` when the paths start with their folder's name.
     window_folder: Option<String>,
     selected: usize,
+    /// Lists the recent files, latest first, instead of the folders' files.
+    recent: bool,
     /// The search for the latest query; replacing it drops the result of an older one.
     search: Task<()>,
     _subscriptions: Vec<Subscription>,
@@ -106,6 +109,7 @@ impl Finder {
             found: fuzzy::Found::default(),
             window_folder,
             selected: 0,
+            recent: false,
             search: Task::ready(()),
             _subscriptions: subscriptions,
         };
@@ -113,8 +117,29 @@ impl Finder {
         this
     }
 
+    /// The finder over `recent` (window paths, latest first, the active file first).
+    pub fn recent(
+        folders: Folders,
+        recent: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let index = FileIndex {
+            paths: recent,
+            capped: false,
+        };
+        let mut this = Self::new(folders, Some(Arc::new(index)), window, cx);
+        this.recent = true;
+        this.refilter(None, cx);
+        this
+    }
+
     /// A fresh walk of the folders came back: search it, keeping the chosen file chosen.
     pub fn set_index(&mut self, index: Arc<FileIndex>, cx: &mut Context<Self>) {
+        // The recent files are their own list.
+        if self.recent {
+            return;
+        }
         let chosen = self
             .index
             .as_ref()
@@ -149,6 +174,8 @@ impl Finder {
             return;
         };
         let query = self.input.read(cx).value().to_string();
+        // IntelliJ's Recent Files starts on the file before the active one: Cmd+E, Enter goes back.
+        let first = usize::from(self.recent && query.trim().is_empty());
         let searched = index.clone();
         let search =
             cx.background_spawn(async move { fuzzy::search(&query, &searched.paths, MAX_ROWS) });
@@ -162,7 +189,7 @@ impl Finder {
                             .iter()
                             .position(|m| index.paths[m.index] == keep)
                     })
-                    .unwrap_or(0);
+                    .unwrap_or(first.min(found.matches.len().saturating_sub(1)));
                 this.found = found;
                 cx.notify();
             });
@@ -385,9 +412,10 @@ impl Render for Finder {
             .line_height(z(INPUT_LINE, cx));
         // Input's own `h` sizes only multi-line inputs; the style's height sizes a single line.
         let input = Styled::h(input, z(INPUT_LINE + 4., cx));
-        let title = match wants_line {
-            true => "Go to Line",
-            false => "Go to File",
+        let title = match (wants_line, self.recent) {
+            (true, _) => "Go to Line",
+            (false, true) => "Recent Files",
+            (false, false) => "Go to File",
         };
         modal::sheet(cx)
             .id("finder")
