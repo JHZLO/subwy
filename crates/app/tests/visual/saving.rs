@@ -1,4 +1,5 @@
-//! Auto-save: edited files save when the window loses focus; a file changed on disk keeps its version.
+//! Auto-save: edited files save when typing pauses and when the window loses focus; a file changed
+//! on disk keeps its version.
 
 use std::fs;
 
@@ -8,8 +9,29 @@ use crate::check::Check;
 
 pub fn run(check: &mut Check) {
     saves_after_focus_loss(check);
+    saves_once_typing_pauses(check);
     saves_as_subwy_quits(check);
     pasted_returns_save_as_the_files_line_ending(check);
+}
+
+/// Typing that stops for a moment is saved, so a crash loses at most that moment.
+fn saves_once_typing_pauses(check: &mut Check) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let a = dir.path().join("a.md");
+    fs::write(&a, "alpha\n").expect("write");
+    let window = check.open(Some(dir.path()));
+    // Rows: the folder, a.md.
+    check.keys(window, "down down enter");
+    check.cx.simulate_input(window, "z");
+    let typing = fs::read_to_string(&a).ok();
+    check.expect_eq(
+        "a file is not saved while typing goes on",
+        typing,
+        Some("alpha\n".to_string()),
+    );
+    check.cx.advance_clock(std::time::Duration::from_secs(3));
+    let saved = check.wait_until(|_| fs::read_to_string(&a).is_ok_and(|text| text == "zalpha\n"));
+    check.expect_eq("an edited file saves once typing pauses", saved, true);
 }
 
 fn saves_after_focus_loss(check: &mut Check) {

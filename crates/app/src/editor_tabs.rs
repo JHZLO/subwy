@@ -6,6 +6,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
+    time::Duration,
 };
 
 use gpui_kit::component::{
@@ -134,6 +135,9 @@ struct PendingOpen {
 /// What a word count was taken of: the editor, its edits, its length and the selection.
 type CountedOf = (EntityId, u64, usize, Range<usize>);
 
+/// How long typing has to pause before the edits are saved.
+const IDLE_SAVE: Duration = Duration::from_secs(2);
+
 pub struct EditorTabs {
     /// Where the tabs' relative paths are on disk.
     folders: Folders,
@@ -155,6 +159,8 @@ pub struct EditorTabs {
     /// The line the outline last marked its section by. The editor learns what it shows while it
     /// paints, a frame after it scrolled, so after each frame this is checked again.
     outline_line: Cell<Option<u32>>,
+    /// The auto-save that waits for typing to pause; each edit starts it over.
+    idle_save: Task<()>,
     preview: Option<Entity<Preview>>,
     /// IntelliJ's Preview only: the preview takes the whole pane for a Markdown tab.
     preview_only: bool,
@@ -318,6 +324,7 @@ impl EditorTabs {
             last_selection: 0..0,
             counted: RefCell::default(),
             outline_line: Cell::default(),
+            idle_save: Task::ready(()),
             preview: None,
             preview_only: false,
             split: 0.5,
@@ -793,11 +800,15 @@ impl EditorTabs {
             Self::follow_links(&editor, true, cx);
         }
         let subscriptions = vec![
-            cx.subscribe(&editor, |this, editor, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.edited(&editor, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &editor,
+                window,
+                |this, editor, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::Change) {
+                        this.edited(editor, window, cx);
+                    }
+                },
+            ),
             // The editor notifies on every caret blink; pass on only a move to another line.
             cx.observe(&editor, |this, editor, cx| {
                 if this.active_tab().is_some_and(|t| t.editor == editor) {
@@ -831,11 +842,28 @@ impl EditorTabs {
         }
     }
 
-    fn edited(&mut self, editor: &Entity<EditorState>, cx: &mut Context<Self>) {
+    fn edited(
+        &mut self,
+        editor: &Entity<EditorState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(tab) = self.tabs.iter_mut().find(|t| &t.editor == editor) {
             tab.dirty = true;
             tab.pass_through = false;
             tab.edits += 1;
+        }
+        // Saving only on leaving the window lost what was typed since, when subwy did not get
+        // to quit; a pause in typing is saved too.
+        if crate::settings(cx).auto_save {
+            self.idle_save = cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor().timer(IDLE_SAVE).await;
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.save_edited(window, cx)
+                        .into_iter()
+                        .for_each(Task::detach)
+                });
+            });
         }
         if let Some(preview) = self.preview.clone()
             && self.preview_source().as_ref() == Some(editor)
