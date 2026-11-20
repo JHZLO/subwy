@@ -1,9 +1,11 @@
 //! The icons in front of tree rows, chosen by file type as IntelliJ does: Lucide outlines that come
-//! with gpui-kit (ISC). They take no color of their own; color in the tree is the route's.
+//! with gpui-kit (ISC), in their type's color.
 
 use std::borrow::Cow;
 
 use gpui_kit::{assets::IconName, *};
+
+use crate::theme::Palette;
 
 // Only these are embedded beyond gpui-kit's own icons, not the whole catalog.
 gpui_kit::assets::icon_assets!(
@@ -92,12 +94,72 @@ pub fn file_icon(name: &str) -> IconName {
     }
 }
 
+/// The color an icon takes for its type, as IntelliJ colors its icons. Only the skin's own route
+/// colors (picked for Kraft's hues: brown, blue, red, green, purple, teal), so no new color comes
+/// in and every skin has them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tint {
+    Ink,
+    Route(usize),
+}
+
+impl Tint {
+    pub fn color(self, p: &Palette) -> u32 {
+        match self {
+            Tint::Ink => p.ink,
+            Tint::Route(index) => p.route[index % p.route.len()],
+        }
+    }
+}
+
+/// The tint of a folder known by its name, or of a file by its type; `None` keeps the plain icon.
+pub fn tint(name: &str, is_dir: bool) -> Option<Tint> {
+    let name = name.to_ascii_lowercase();
+    if is_dir {
+        return match name.as_str() {
+            ".github" => Some(Tint::Ink),
+            ".gradle" | "gradle" => Some(Tint::Route(5)),
+            ".kotlin" | "modules" => Some(Tint::Route(4)),
+            "build" | "target" => Some(Tint::Route(2)),
+            "docs" | "src" | "services" => Some(Tint::Route(1)),
+            "test" | "tests" => Some(Tint::Route(3)),
+            _ => None,
+        };
+    }
+    match name.as_str() {
+        "dockerfile" | ".dockerignore" | "docker-compose.yml" | "docker-compose.yaml" => {
+            return Some(Tint::Route(1));
+        }
+        "makefile" | "justfile" | "gradlew" | "gradlew.bat" => return Some(Tint::Route(3)),
+        _ => {}
+    }
+    if name.starts_with(".git") {
+        return Some(Tint::Route(2));
+    }
+    // Before the extension: `build.gradle.kts` is Gradle's, not Kotlin's.
+    if name.ends_with(".gradle.kts") {
+        return Some(Tint::Route(5));
+    }
+    let extension = name.rsplit_once('.').map_or("", |(_, extension)| extension);
+    let route = match extension {
+        "rs" | "js" | "jsx" | "mjs" | "cjs" | "json" | "jsonc" | "toml" => 0,
+        "ts" | "tsx" | "py" | "c" | "h" | "cpp" | "md" | "markdown" | "sql" => 1,
+        "java" | "swift" | "html" | "htm" | "xml" | "yaml" | "yml" => 2,
+        "sh" | "bash" | "zsh" | "fish" | "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp"
+        | "ico" | "bmp" => 3,
+        "kt" | "kts" | "css" | "scss" => 4,
+        "go" | "gradle" => 5,
+        _ => return None,
+    };
+    Some(Tint::Route(route))
+}
+
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that brings gpui's `test` attribute, which shadows the standard one.
     use gpui_kit::assets::IconName;
 
-    use super::{file_icon, folder_icon};
+    use super::{Tint, file_icon, folder_icon, tint};
 
     #[test]
     fn files_get_the_icon_of_their_type() {
@@ -113,6 +175,24 @@ mod tests {
         // No extension, or one subwy does not know: a plain page.
         assert_eq!(file_icon("LICENSE"), IconName::File);
         assert_eq!(file_icon("notes.xyz"), IconName::File);
+    }
+
+    #[test]
+    fn icons_take_the_color_of_their_type() {
+        assert_eq!(tint("LoginDto.kt", false), Some(Tint::Route(4)));
+        assert_eq!(tint("main.rs", false), Some(Tint::Route(0)));
+        assert_eq!(tint("README.md", false), Some(Tint::Route(1)));
+        assert_eq!(tint("application.yml", false), Some(Tint::Route(2)));
+        assert_eq!(tint("gradlew", false), Some(Tint::Route(3)));
+        // Gradle's script, not a Kotlin file.
+        assert_eq!(tint("build.gradle.kts", false), Some(Tint::Route(5)));
+        assert_eq!(tint(".gitignore", false), Some(Tint::Route(2)));
+        assert_eq!(tint("notes.txt", false), None);
+        // Folders by name only: a file called `build` is not the build folder.
+        assert_eq!(tint("build", true), Some(Tint::Route(2)));
+        assert_eq!(tint(".github", true), Some(Tint::Ink));
+        assert_eq!(tint("build", false), None);
+        assert_eq!(tint("build-logic", true), None);
     }
 
     #[test]

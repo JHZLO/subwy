@@ -2027,7 +2027,11 @@ impl ProjectPanel {
             } else {
                 icons::file_icon(&row.name)
             };
-            let color = if on_route { p.sub } else { p.ignored };
+            let color = match icons::tint(&row.name, is_dir) {
+                Some(tint) => tint.color(p),
+                None if on_route => p.sub,
+                None => p.ignored,
+            };
             Icon::new(icon)
                 .size(z(ICON_SIZE, cx))
                 .flex_none()
