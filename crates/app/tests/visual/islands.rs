@@ -52,6 +52,49 @@ pub fn run(check: &mut Check) {
         360.,
     );
     check.shot(window, "islands-2-resized");
+    focus_mode(check);
+}
+
+/// Cmd+Shift+F12 hides the tree, the terminal and the tab bar, and brings back what it hid when
+/// pressed again. Showing the tree on its own ends it too.
+fn focus_mode(check: &mut Check) {
+    let fixture = fixture();
+    let window = check.open(Some(fixture.path()));
+    check.keys(window, "cmd-shift-o g p a t h enter");
+    // The tree, the terminal, and focus mode.
+    let shown = |check: &mut Check| {
+        check.workspace(window, |w, cx| {
+            (
+                w.tree_expanded(cx).is_some(),
+                w.terminal_lines(cx).is_some(),
+                w.focus_mode(),
+            )
+        })
+    };
+    let before = shown(check);
+    check.expect_eq("the tree and terminal show", before, (true, true, false));
+    check.keys(window, "cmd-shift-f12");
+    let hidden = shown(check);
+    check.expect_eq(
+        "focus mode hides the tree and terminal",
+        hidden,
+        (false, false, true),
+    );
+    check.shot(window, "islands-3-focus-mode");
+    check.keys(window, "cmd-shift-f12");
+    let back = shown(check);
+    check.expect_eq("pressed again, they come back", back, (true, true, false));
+    check.keys(window, "cmd-shift-f12 cmd-1");
+    let tree = shown(check);
+    check.expect_eq(
+        "cmd-1 brings the tree and ends focus mode",
+        tree,
+        (true, false, false),
+    );
+    check
+        .cx
+        .update_window(window, |_, window, _| window.remove_window())
+        .expect("window");
 }
 
 /// Presses at `from`, moves past GPUI's drag threshold, then to `to`, and lets go.

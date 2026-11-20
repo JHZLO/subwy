@@ -179,6 +179,8 @@ pub struct EditorTabs {
     extended: Option<Extended>,
     /// Hidden, the tree is otherwise only Cmd+1 away: the tab bar leads with a button to show it.
     pub tree_hidden: bool,
+    /// Focus mode (Cmd+Shift+F12): no tab bar, nor the file's route under it; only the text.
+    pub focus_mode: bool,
 }
 
 /// The selections Alt+Up grew from, and the one it made last: a run goes on only from that one.
@@ -337,6 +339,7 @@ impl EditorTabs {
             occurrences: None,
             extended: None,
             tree_hidden: false,
+            focus_mode: false,
         }
     }
 
@@ -2513,8 +2516,10 @@ impl Render for EditorTabs {
             .h_full()
             .flex()
             .flex_col()
-            .child(self.render_tab_bar(cx))
-            .children(self.active_tab().map(|tab| self.render_route_path(tab, cx)))
+            .when(!self.focus_mode, |el| {
+                el.child(self.render_tab_bar(cx))
+                    .children(self.active_tab().map(|tab| self.render_route_path(tab, cx)))
+            })
             .child(
                 div()
                     .flex_1()

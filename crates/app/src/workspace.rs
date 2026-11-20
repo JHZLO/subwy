@@ -26,8 +26,8 @@ use crate::{
         Back, CloseSettings, CloseTab, Collapse, CopyFileName, CopyPath, CopyRelativePath, Expand,
         FindBacklinks, FocusEditor, FocusTree, Forward, GoToLine, NewTerminal, NewWindow, NextTab,
         Open, OpenFolder, OpenSettings, PrevTab, Quit, RecentFiles, ReopenClosedTab,
-        RevealInFinder, Save, SelectNext, SelectPrev, ToggleFinder, TogglePreview, ToggleSearch,
-        ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
+        RevealInFinder, Save, SelectNext, SelectPrev, ToggleFinder, ToggleFocusMode, TogglePreview,
+        ToggleSearch, ToggleTerminal, WORKSPACE, ZoomIn, ZoomOut, ZoomReset,
     },
     project_panel::{DraggedItems, FileEvent, PanelEvent, ProjectPanel, ResizeDrag},
     search_panel::{self, SearchEvent, SearchPanel},
@@ -81,6 +81,13 @@ struct Overlay {
     _subscription: Subscription,
 }
 
+/// What focus mode (Cmd+Shift+F12) hid, to show again when it ends.
+#[derive(Clone, Copy)]
+struct FocusMode {
+    tree: bool,
+    terminal: bool,
+}
+
 /// How many files Cmd+E remembers, as IntelliJ's Recent Files does.
 const RECENT_FILES: usize = 50;
 
@@ -95,6 +102,7 @@ pub struct Workspace {
     /// The left side's share of the editor's width while split, dragged from the gap between.
     split_ratio: f32,
     tree_visible: bool,
+    focus_mode: Option<FocusMode>,
     terminal: Option<Terminal>,
     /// The terminal's height at 100% zoom, dragged from the gap above it.
     terminal_height: f32,
@@ -442,6 +450,7 @@ impl Workspace {
             right_active: false,
             split_ratio: 0.5,
             tree_visible: true,
+            focus_mode: None,
             terminal: None,
             terminal_height: size::TERMINAL_HEIGHT,
             overlay: None,
@@ -750,7 +759,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<EditorTabs> {
-        let side = cx.new(|cx| EditorTabs::new(folders, cx));
+        let focus_mode = self.focus_mode.is_some();
+        let side = cx.new(|cx| {
+            let mut tabs = EditorTabs::new(folders, cx);
+            tabs.focus_mode = focus_mode;
+            tabs
+        });
         let id = side.entity_id();
         let focus = side.read(cx).focus_handle(cx);
         self._subscriptions.extend([
@@ -1380,6 +1394,11 @@ impl Workspace {
         }
     }
 
+    /// Whether focus mode (Cmd+Shift+F12) is on; for the UI checks.
+    pub fn focus_mode(&self) -> bool {
+        self.focus_mode.is_some()
+    }
+
     /// Whether the Settings dialog is open; for the UI checks.
     pub fn settings_open(&self) -> bool {
         self.settings.is_some()
@@ -1515,6 +1534,7 @@ impl Workspace {
     /// Shows the terminal, starting a shell in the open folder when there is none. None when no
     /// folder is open or the shell could not start.
     fn show_terminal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<&Terminal> {
+        self.end_focus_mode(cx);
         if self.terminal.is_none() {
             let root = self.root(cx)?;
             if !self.start_terminal(&[root], &[], 0, window, cx) {
@@ -1642,11 +1662,67 @@ impl Workspace {
 
     /// The tab bar offers a hidden tree back, so it is told too.
     fn show_tree(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if visible {
+            self.end_focus_mode(cx);
+        }
         self.tree_visible = visible;
         self.tabs.update(cx, |tabs, cx| {
             tabs.tree_hidden = !visible;
             cx.notify();
         });
+    }
+
+    /// Cmd+Shift+F12 (IntelliJ's Hide All Tool Windows): focus mode hides the tree, the terminal
+    /// and the tab bars, leaving the text; pressed again, it shows what it hid.
+    fn toggle_focus_mode(
+        &mut self,
+        _: &ToggleFocusMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.panel.is_none() {
+            return;
+        }
+        if let Some(hid) = self.focus_mode.take() {
+            self.set_tab_bars(true, cx);
+            if hid.tree {
+                self.show_tree(true, cx);
+            }
+            if let Some(terminal) = self.terminal.as_mut().filter(|_| hid.terminal) {
+                terminal.visible = true;
+            }
+        } else {
+            let panel_focused = self.tree_focused(window, cx) || self.terminal_focused(window, cx);
+            self.focus_mode = Some(FocusMode {
+                tree: self.tree_visible,
+                terminal: self.terminal.as_ref().is_some_and(|t| t.visible),
+            });
+            self.show_tree(false, cx);
+            if let Some(terminal) = &mut self.terminal {
+                terminal.visible = false;
+            }
+            self.set_tab_bars(false, cx);
+            if panel_focused {
+                self.focus_editor_area(window, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Showing the tree or the terminal on its own ends focus mode: the tab bars come back.
+    fn end_focus_mode(&mut self, cx: &mut Context<Self>) {
+        if self.focus_mode.take().is_some() {
+            self.set_tab_bars(true, cx);
+        }
+    }
+
+    fn set_tab_bars(&self, shown: bool, cx: &mut Context<Self>) {
+        for side in self.sides() {
+            side.update(cx, |tabs, cx| {
+                tabs.focus_mode = !shown;
+                cx.notify();
+            });
+        }
     }
 
     /// Opens the finder over the window, or closes it and gives focus back.
@@ -2223,6 +2299,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::go_to_line))
             .on_action(cx.listener(Self::toggle_search))
             .on_action(cx.listener(Self::toggle_terminal))
+            .on_action(cx.listener(Self::toggle_focus_mode))
             .on_action(cx.listener(Self::new_terminal))
             .on_action(cx.listener(Self::copy_path))
             .on_action(cx.listener(Self::copy_relative_path))

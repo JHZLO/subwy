@@ -35,6 +35,7 @@ actions!(
         ToggleSearch,
         NewWindow,
         ToggleTerminal,
+        ToggleFocusMode,
         OpenSettings,
     ]
 );
@@ -300,6 +301,8 @@ fn own_keys() -> Vec<Own> {
         own("alt-down", ShrinkSelection, Some(EDITOR_INPUT)),
         // The terminal (IntelliJ's Alt+F12). Keys without a binding go to the shell.
         own("alt-f12", ToggleTerminal, ws),
+        // IntelliJ's Hide All Tool Windows; here the tab bar goes too.
+        own("cmd-shift-f12", ToggleFocusMode, ws),
         own("cmd-c", CopySelection, Some(TERMINAL)),
         own("cmd-v", Paste, Some(TERMINAL)),
         // gpui-kit's root moves focus with tab and shift-tab; in the terminal they are the shell's.
